@@ -106,6 +106,7 @@ fn encode(
     key: &ImageKey,
     image: image::DynamicImage,
     kitty_id: u32,
+    source_dimensions: (u32, u32),
 ) -> Result<SlicedProtocol> {
     let font = picker.font_size();
     let pixels = f64::from(key.width)
@@ -117,7 +118,12 @@ fn encode(
         (f64::from(key.width) * scale).floor().max(1.0) as u16,
         (f64::from(key.height) * scale).floor().max(1.0) as u16,
     );
-    let resize = if key.upscale {
+    // Layout already caps inline images at their original pixel size. Decoded
+    // animation frames may be smaller to meet the memory budget.
+    let resize = if key.upscale
+        || image.width() < source_dimensions.0
+        || image.height() < source_dimensions.1
+    {
         Resize::Scale(None)
     } else {
         Resize::Fit(None)
@@ -337,6 +343,7 @@ impl Media {
                 continue;
             }
             let frames = animation.frames.clone();
+            let dimensions = self.entries[key].dimensions;
             let kitty_id = self.allocate_image_id();
             self.pending.insert(key.clone(), kitty_id);
             let key = key.clone();
@@ -354,7 +361,13 @@ impl Media {
                 } else {
                     let job_key = key.clone();
                     match tokio::task::spawn_blocking(move || {
-                        encode(&picker, &job_key, frames[index].0.clone(), kitty_id)
+                        encode(
+                            &picker,
+                            &job_key,
+                            frames[index].0.clone(),
+                            kitty_id,
+                            dimensions,
+                        )
                     })
                     .await
                     {
@@ -430,7 +443,8 @@ impl Media {
                 if !job_key.animate {
                     frames.truncate(1);
                 }
-                let protocol = encode(&picker, &job_key, frames[0].0.clone(), kitty_id)?;
+                let protocol =
+                    encode(&picker, &job_key, frames[0].0.clone(), kitty_id, dimensions)?;
                 let font = picker.font_size();
                 let encoded_bytes = (u64::from(job_key.width)
                     * u64::from(job_key.height)
@@ -922,6 +936,32 @@ mod tests {
 
 #[cfg(test)]
 mod animation_tests {
+    #[test]
+    fn downsampled_frames_fill_the_original_layout_without_enlarging_small_source_images() {
+        let picker = Picker::halfblocks();
+        let font = picker.font_size();
+        let key = ImageKey {
+            path: String::new(),
+            width: 12,
+            height: 6,
+            upscale: false,
+            animate: true,
+        };
+        let frame =
+            image::DynamicImage::new_rgba8(u32::from(font.width) * 6, u32::from(font.height) * 3);
+        for (columns, rows) in [(12, 6), (6, 3)] {
+            let source = (
+                u32::from(font.width) * u32::from(columns),
+                u32::from(font.height) * u32::from(rows),
+            );
+            assert_eq!(
+                encode(&picker, &key, frame.clone(), 1, source)
+                    .unwrap()
+                    .size(),
+                ratatui::layout::Size::new(columns, rows)
+            );
+        }
+    }
     #[test]
     fn graphics_ids_do_not_reuse_active_pending_or_retired_images_at_wraparound() {
         let mut media = Media::new(Picker::halfblocks());
