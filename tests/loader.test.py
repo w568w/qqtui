@@ -4,6 +4,7 @@ import argparse
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -16,7 +17,7 @@ class LoaderTest(unittest.TestCase):
     loader_path = None
 
     def test_manifest_reads_and_original_write_paths(self):
-        with tempfile.TemporaryDirectory(prefix="qqtui loader '") as temp:
+        with tempfile.TemporaryDirectory(prefix="qqtui-loader-") as temp:
             work = Path(temp)
             compiler = shlex.split(os.environ.get("CC") or "cc")
             cflags = shlex.split(os.environ.get("CFLAGS", ""))
@@ -31,8 +32,13 @@ class LoaderTest(unittest.TestCase):
                     + ["-o", str(loader), "-ldl"],
                     check=True,
                 )
+            data = work / "path with ' quotes"
+            data.mkdir()
+            copied_loader = data / "loader.so"
+            shutil.copy2(loader, copied_loader)
+            loader = copied_loader
             original, replacement, unrelated = [
-                work / name for name in ["original", "replacement", "unrelated"]
+                data / name for name in ["original", "replacement", "unrelated"]
             ]
             original.write_text("original")
             replacement.write_text("replacement")

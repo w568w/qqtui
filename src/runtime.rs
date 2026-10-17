@@ -38,6 +38,7 @@ impl Default for Config {
 #[derive(Clone)]
 pub struct Paths {
     pub account: Option<String>,
+    #[cfg(target_os = "linux")]
     pub shared_state: PathBuf,
     pub config: PathBuf,
     pub state: PathBuf,
@@ -57,6 +58,7 @@ impl Paths {
             .unwrap_or_else(|| state.join("runtime"));
         Ok(Self {
             account: None,
+            #[cfg(target_os = "linux")]
             shared_state: state.clone(),
             config: base.config_dir().join("qqtui"),
             state,
@@ -356,6 +358,7 @@ mod account_tests {
         let second = base.for_account("654321").unwrap();
         assert_ne!(first.socket(), second.socket());
         assert_ne!(first.state, second.state);
+        #[cfg(target_os = "linux")]
         assert_eq!(first.shared_state, base.state);
         assert_eq!(first.config.file_name().unwrap(), "123456");
         assert_eq!(first.service_name(), "qqtui-host@123456.service");

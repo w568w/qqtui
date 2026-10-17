@@ -3,17 +3,22 @@ on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
 jobs:
-  core:
+  linux:
+    runs-on: ubuntu-24.04
+    container:
+      image: archlinux:base-devel@sha256:d6979123107e7a9f52c2de19104966b5f809e13a4593017780bd8c0b140f80ff
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-24.04
-            compiler: gcc
-          - os: ubuntu-24.04
-            compiler: clang
-          - os: windows-2025
-    runs-on: ${{ matrix.os }}
+        compiler: [gcc, clang]
+    steps:
+      - run: pacman -Syu --noconfirm --needed rust sqlite nodejs python clang git
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - env:
+          CC: ${{ matrix.compiler }}
+        run: python scripts/check.py
+  windows:
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -21,9 +26,4 @@ jobs:
           node-version-file: .node-version
       - run: rustup update stable
       - run: rustup component add rustfmt clippy
-      - if: runner.os == 'Linux'
-        env:
-          CC: ${{ matrix.compiler }}
-        run: python scripts/check.py
-      - if: runner.os == 'Windows'
-        run: python scripts/check.py
+      - run: python scripts/check.py
