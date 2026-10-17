@@ -102,6 +102,19 @@ pub async fn run(paths: &Paths, no_open: bool) -> Result<()> {
         .open(paths.runtime.join("viewer.lock"))?;
     lock.try_lock_exclusive()
         .context("已有临时 QQ 查看器正在运行")?;
+    let (events, _events) = tokio::sync::mpsc::channel(8);
+    let desktop = crate::backend::Backend::connect(&paths.socket(), events).await?;
+    let status: crate::model::HostStatus =
+        desktop.call("host.status", serde_json::json!({})).await?;
+    if status
+        .capabilities
+        .iter()
+        .any(|capability| capability == "desktop_viewer")
+    {
+        desktop
+            .call::<serde_json::Value>("host.viewer", serde_json::json!({"active":true}))
+            .await?;
+    }
     let display =
         std::fs::read_to_string(paths.runtime.join("display")).context("QQ 宿主尚未启动")?;
     let display = if display.starts_with(':') {

@@ -10,7 +10,7 @@ Arch 开发环境需要 base-devel、Rust（至少 Cargo.toml 中的 rust-versio
 
 ## 检查
 
-`python scripts/check.py` 执行格式、Rust 测试、Clippy、桥接及 loader 检查。终端与软件包集成检查的附加依赖和命令见 [验证方法](docs/VALIDATION.md)。也可单独执行 `cargo test --locked`、`cargo clippy --all-targets --locked -- -D warnings`、`node --test tests/native.test.cjs tests/journal.test.cjs` 和 `python tests/loader.test.py`。
+`python scripts/check.py` 执行格式、Rust 测试、Clippy、桥接及 loader 检查。终端与软件包集成检查的附加依赖和命令见 [验证方法](docs/VALIDATION.md)。也可单独执行 `cargo test --locked`、`cargo clippy --all-targets --locked -- -D warnings`、`node --test tests/native.test.cjs tests/journal.test.cjs tests/desktop.test.cjs` 和 `python tests/loader.test.py`。
 
 行为变更附带相应回归。自动化测试使用临时目录和模拟标识，QQ 接入测试使用专用账号或会话。
 

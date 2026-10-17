@@ -695,3 +695,44 @@ test('image uploads use GIF bytes and matching native media subtypes rather than
     assert.equal(receipt.state,'submitted');
   }
 });
+
+test('viewer leases are connection scoped and status updates work without subscribers', async t => {
+  const { b } = fixture(t);
+  const calls = [];
+  b.options.desktop = {
+    setReady: ready => calls.push(['ready', ready]),
+    viewer: (client, active) => calls.push([client, active]),
+  };
+  b.phase = 'login';
+  b.event('status', {status:b.status()});
+  const client = {};
+  await b.call('host.viewer', {active:true}, client);
+  await b.call('host.viewer', {active:false}, client);
+  await assert.rejects(b.call('host.viewer', {active:'yes'}, client), /Viewer state required/);
+  assert.deepEqual(calls, [['ready',false],[client,true],[client,false]]);
+});
+
+test('closing the viewer RPC connection releases its desktop lease', async t => {
+  const {b}=fixture(t);
+  const leases=new Set();
+  let release;
+  const released=new Promise(resolve=>{release=resolve;});
+  b.options.desktop={
+    viewer(client,active) {
+      if(active) leases.add(client);
+      else { leases.delete(client); release(); }
+    },
+  };
+  b.listen();
+  const {once}=require('node:events');
+  await once(b.server,'listening');
+  const socket=require('node:net').createConnection(b.socketPath);
+  t.after(async()=>{socket.destroy();await new Promise(resolve=>b.server.close(resolve));});
+  await once(socket,'connect');
+  socket.write(JSON.stringify({jsonrpc:'2.0',id:1,method:'host.viewer',params:{active:true}})+'\n');
+  await once(socket,'data');
+  assert.equal(leases.size,1);
+  socket.end();
+  await released;
+  assert.equal(leases.size,0);
+});

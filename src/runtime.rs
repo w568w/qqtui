@@ -162,6 +162,7 @@ impl Paths {
                 include_bytes!("../bridge/presentation.cjs"),
             ),
             ("accounts.cjs", include_bytes!("../bridge/accounts.cjs")),
+            ("desktop.cjs", include_bytes!("../bridge/desktop.cjs")),
             (
                 "qq-resources.cjs",
                 include_bytes!("../bridge/qq-resources.cjs"),

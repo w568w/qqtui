@@ -7,6 +7,7 @@
 | 状态与存储 | 事件缺口、作用域、历史分页、引用、撤回墓碑、版本化草稿、账号交接、发送确认单调性、SQLite WAL | cargo test --locked |
 | 本地传输 | 并发响应关联、取消清理、半帧断线、连接生命周期、帧限制 | Rust backend 测试 |
 | 桥接与日志 | 原生参数、发送去重、NOSEQ、会话变化、回执迁移、角色权限、媒体准备、通知判定 | node --test tests/native.test.cjs tests/journal.test.cjs |
+| 原生窗口 | 后台隐藏、查看器连接租约、隐藏辅助窗口、新建窗口及登录恢复 | node --test tests/desktop.test.cjs |
 | loader | 限定 manifest 的只读重定向、原始写路径、无关文件不重定向 | python3 tests/loader.test.py |
 | 真终端 | 历史锚点、双向分页、鼠标、头像、图片裁剪、动图、预览、转发选择、引用往返、禁言和解除、表情发送 | python3 tests/tui-history.test.py --binary target/debug/qqtui |
 | 终端边界 | 不响应光标查询的伪终端、持续缩放、退出恢复、账号选择框 | terminal-resize.test.py、account-picker.test.py |

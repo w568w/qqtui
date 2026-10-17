@@ -2,7 +2,9 @@
 const fs = require("node:fs");
 const crypto = require("node:crypto");
 const { NativeBridge } = require("./native.cjs");
-const app = require("electron").app;
+const electron = require("electron");
+const app = electron.app;
+const desktop = new (require("./desktop.cjs").Desktop)(electron);
 const handleBrokenPipe = () => {};
 const { AccountSession } = require("./accounts.cjs");
 const accounts = new AccountSession(app, {
@@ -20,6 +22,7 @@ const bridge = new NativeBridge(process.env.QQTUI_SOCKET, {
   profileDir: app.getPath("userData"),
   userData: accounts.root,
   qqVersion: app.getVersion(),
+  desktop,
   framework: compatibility?.framework,
 });
 

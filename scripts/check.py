@@ -21,7 +21,7 @@ def main():
     run("cargo", "fmt", "--check")
     run("cargo", "test", "--locked")
     run("cargo", "clippy", "--all-targets", "--locked", "--", "-D", "warnings")
-    run("node", "--test", "tests/native.test.cjs", "tests/journal.test.cjs")
+    run("node", "--test", "tests/native.test.cjs", "tests/journal.test.cjs", "tests/desktop.test.cjs")
     if sys.platform == "linux":
         run(sys.executable, "tests/loader.test.py")
     if args.terminal:

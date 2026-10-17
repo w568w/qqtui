@@ -11,6 +11,7 @@
 | 方法 | 参数 | 返回 |
 |---|---|---|
 | host.status | 无 | protocol_version、phase、account、epoch、seq、errors、capabilities；诊断包括 native_account_path 和 profile_dir |
+| host.viewer | active：布尔值 | 获取／释放当前连接的 QQ 查看器租约；连接关闭时自动释放 |
 | accounts.list | 无 | items：QQ 记住的 account、name；不返回凭据 |
 | events.subscribe | 无 | 当前宿主状态，并开始接收事件 |
 | conversations.snapshot | account | account、epoch、查询起始 seq、conversations、可空 unread_total（原生主列表提醒计数） |

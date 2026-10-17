@@ -351,6 +351,7 @@ class NativeBridge {
       socket.on("error", () => {});
       socket.on("close", () => {
         this.clients.delete(socket);
+        this.options.desktop?.viewer(socket, false);
         if (![...this.clients].some((s) => s.subscribed)) this.unsubscribe();
       });
     });
@@ -367,6 +368,7 @@ class NativeBridge {
     socket.write(json(value) + "\n");
   }
   event(kind, data = {}) {
+    if (kind === "status") this.options.desktop?.setReady(this.phase === "ready");
     if (![...this.clients].some((s) => s.subscribed)) return;
     const event = {
       epoch: this.epoch,
@@ -448,6 +450,7 @@ class NativeBridge {
             "speech_permissions",
           ]
         : [];
+    if (this.options.desktop) capabilities.push("desktop_viewer");
     if (this.phase === "ready") {
       if (
         typeof this.msg?.fetchFavEmojiList === "function" ||
@@ -1117,6 +1120,12 @@ class NativeBridge {
   }
   async call(method, p, socket) {
     if (method === "host.status") return this.status();
+    if (method === "host.viewer") {
+      if (!this.options.desktop) throw new Error("QQ desktop control unavailable");
+      if (typeof p.active !== "boolean") throw new Error("Viewer state required");
+      this.options.desktop.viewer(socket, p.active);
+      return {};
+    }
     if (method === "accounts.list") {
       const login = this.wrapper?.NodeIKernelLoginService?.get?.();
       if (typeof login?.getLoginList !== "function") return { items: [] };
