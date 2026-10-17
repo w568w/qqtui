@@ -1,0 +1,14 @@
+{
+  "linux": {
+    "x64": {
+      "3.2.34-53644": {
+        "wrapper_sha256": "236ff3ebf29310c75a41394d80db4587411d43d66208c2a7d58b160d7b7b213b",
+        "framework": "native",
+        "rich_media_visit_fields": [
+          "elem",
+          "triggerType"
+        ]
+      }
+    }
+  }
+}

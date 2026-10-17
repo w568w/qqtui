@@ -1,0 +1,12 @@
+/target/
+/dist/
+/build/
+*.log
+
+__pycache__/
+*.pyc
+
+/packaging/arch/src/
+/packaging/arch/pkg/
+/packaging/arch/*.pkg.tar.*
+/packaging/arch/qqtui-*.tar.*

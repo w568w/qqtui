@@ -1,0 +1,14 @@
+[Unit]
+Description=QQ TUI native QQ host
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/qqtui host
+Restart=no
+TimeoutStopSec=15
+UMask=0077
+KillMode=mixed
+
+[Install]
+WantedBy=default.target
