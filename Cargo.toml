@@ -5,6 +5,7 @@ edition = "2024"
 rust-version = "1.99"
 description = "A native-service terminal frontend for QQ"
 license = "MPL-2.0"
+repository = "https://github.com/w568w/qqtui"
 
 [dependencies]
 anyhow = "1"

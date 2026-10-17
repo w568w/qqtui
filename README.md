@@ -8,7 +8,7 @@
 
 支持 Arch Linux x86_64，推荐使用 Kitty。首次登录需要图形浏览器。
 
-构建安装见 [构建指南](CONTRIBUTING.md#arch-打包)。
+从 [AUR](https://aur.archlinux.org/packages/qqtui) 安装 `qqtui`。手动打包见 [构建指南](CONTRIBUTING.md#arch-打包)。
 
 ## 使用
 

@@ -6,7 +6,7 @@
 
 Arch 开发环境需要 base-devel、Rust（至少 Cargo.toml 中的 rust-version）、SQLite、Node.js 和 Python。运行 `cargo build --locked` 构建，默认输出为 target/debug/qqtui。Cargo.lock 固定 Rust 依赖；Linux 链接系统 SQLite，C 工具链用于构建 QQ loader。
 
-完整 QQ 宿主需要 packaging/arch/PKGBUILD 中的运行依赖。运行环境与首次登录见 [README](README.md)，平台适配见 [维护约定](docs/MAINTAINABILITY.md)。
+完整 QQ 宿主的运行依赖见 [AUR 配方](https://aur.archlinux.org/cgit/aur.git/tree/PKGBUILD?h=qqtui)。运行环境与首次登录见 [README](README.md)，平台适配见 [维护约定](docs/MAINTAINABILITY.md)。
 
 ## 检查
 
@@ -16,6 +16,14 @@ Arch 开发环境需要 base-devel、Rust（至少 Cargo.toml 中的 rust-versio
 
 ## Arch 打包
 
-Arch 包由 packaging/arch/PKGBUILD 管理。prepare 阶段下载锁定依赖，build/check 使用 Cargo 的 frozen 模式。打包规范见 [Arch Rust 打包指南](https://wiki.archlinux.org/title/Rust_package_guidelines)。
+Arch 包使用 [AUR 配方](https://aur.archlinux.org/cgit/aur.git/tree/PKGBUILD?h=qqtui)。prepare 阶段下载锁定依赖，build/check 使用 Cargo 的 frozen 模式。打包规范见 [Arch Rust 打包指南](https://wiki.archlinux.org/title/Rust_package_guidelines)。
 
-先按 AUR 流程安装 linuxqq、novnc 及其 AUR 依赖，将对应版本的源码归档放在配方目录，然后运行 `makepkg -si`。更新配方后用 `makepkg --printsrcinfo > .SRCINFO` 同步元数据。
+先安装 base-devel、git，以及 AUR 中的 linuxqq、novnc 和它们的依赖，然后构建：
+
+```sh
+git clone https://aur.archlinux.org/qqtui.git
+cd qqtui
+makepkg -si
+```
+
+维护配方时，用 `makepkg --printsrcinfo > .SRCINFO` 同步元数据。
