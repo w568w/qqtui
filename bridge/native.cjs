@@ -1777,15 +1777,19 @@ class NativeBridge {
         )
           throw new Error("Image dimensions required");
         const hash = crypto.createHash("md5");
-        for await (const chunk of fs.createReadStream(filename))
+        let signature;
+        for await (const chunk of fs.createReadStream(filename)) {
+          signature ??= chunk.toString("latin1", 0, 6);
           hash.update(chunk);
+        }
         const md5 = hash.digest("hex");
+        const picSubType = a.kind === "sticker" ? 1 : 0;
         assertContext();
         const destination = msg.getRichMediaFilePathForGuild({
           md5HexStr: md5,
           fileName: name,
           elementType: 2,
-          elementSubType: 0,
+          elementSubType: picSubType,
           thumbSize: 0,
           needCreate: true,
           downloadType: 1,
@@ -1824,8 +1828,8 @@ class NativeBridge {
             fileName: name,
             sourcePath: destination,
             original: true,
-            picType: 1000,
-            picSubType: a.kind === "sticker" ? 1 : 0,
+            picType: signature === "GIF87a" || signature === "GIF89a" ? 2000 : 1000,
+            picSubType,
             fileUuid: "",
             fileSubId: "",
             thumbFileSize: 0,

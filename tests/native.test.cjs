@@ -669,3 +669,29 @@ test('missing original messages never resolve to a gray tip or a neighboring seq
     assert.deepEqual((await b.call('messages.sequence',{account:'123',peer,seq:'42'},{})).messages,[]);
   }
 });
+
+test('image uploads use GIF bytes and matching native media subtypes rather than the filename', async t => {
+  const cases = [
+    ['GIF89a', 'favorite.jpg', 'sticker', 2000, 1],
+    ['GIF87a', 'favorite', 'sticker', 2000, 1],
+    ['GIF89a', 'picture.gif', 'image', 2000, 0],
+    ['\x89PNG\r\n', 'favorite.gif', 'sticker', 1000, 1],
+    ['\xff\xd8\xff\xe0JF', 'picture.jpg', 'image', 1000, 0],
+  ];
+  for (const [header, name, kind, type, subtype] of cases) {
+    const {b,dir}=fixture(t);const source=path.join(dir,name),target=path.join(dir,'upload',name);
+    fs.writeFileSync(source,Buffer.from(header,'latin1'));
+    b.msg.getRichMediaFilePathForGuild=args=>{
+      assert.equal(args.elementType,2);assert.equal(args.elementSubType,subtype);
+      return target;
+    };
+    b.msg.sendMsg=async(_id,_peer,elements)=>{
+      const picture=elements[0].picElement;
+      assert.equal(picture.picType,type);assert.equal(picture.picSubType,subtype);
+      assert.equal(picture.sourcePath,target);assert.deepEqual(fs.readFileSync(target),fs.readFileSync(source));
+      return {result:0};
+    };
+    const receipt=await b.send({account:'123',epoch:b.epoch,peer,request_id:'image-format',attachments:[{path:source,name,kind,width:2,height:2}]},nativePeer(peer));
+    assert.equal(receipt.state,'submitted');
+  }
+});
