@@ -1377,6 +1377,36 @@ impl App {
             TerminalEvent::Mouse(m) => {
                 use crossterm::event::{MouseButton, MouseEventKind};
                 use ratatui::layout::Position;
+                if let Modal::EmojiPicker {
+                    index,
+                    items,
+                    query,
+                    ..
+                } = &mut self.modal
+                {
+                    match m.kind {
+                        MouseEventKind::Down(MouseButton::Left) => {
+                            if let Some((_, selected)) = self
+                                .hit_regions
+                                .emoji_cells
+                                .iter()
+                                .find(|(rect, _)| rect.contains(Position::new(m.column, m.row)))
+                            {
+                                *index = *selected;
+                            }
+                        }
+                        MouseEventKind::ScrollUp => {
+                            *index = index.saturating_sub(self.hit_regions.emoji_columns.max(1))
+                        }
+                        MouseEventKind::ScrollDown => {
+                            *index = index
+                                .saturating_add(self.hit_regions.emoji_columns.max(1))
+                                .min(sticker_choices(items, query).len().saturating_sub(1))
+                        }
+                        _ => {}
+                    }
+                    return vec![];
+                }
                 if let Modal::Forward { index, scroll, .. } = &mut self.modal {
                     let point = Position::new(m.column, m.row);
                     if self.forward_area.contains(point) {
@@ -2081,7 +2111,38 @@ impl App {
                     }
                     Modal::None
                 } else {
-                    edit_picker(key, &mut query, &mut index, choices.len());
+                    let delta = match key.code {
+                        KeyCode::Left | KeyCode::BackTab => -1,
+                        KeyCode::Right | KeyCode::Tab => 1,
+                        KeyCode::Up => -(self.hit_regions.emoji_columns.max(1) as isize),
+                        KeyCode::Down => self.hit_regions.emoji_columns.max(1) as isize,
+                        KeyCode::PageUp => -(self.hit_regions.emoji_cells.len() as isize),
+                        KeyCode::PageDown => self.hit_regions.emoji_cells.len() as isize,
+                        KeyCode::Home => -(index as isize),
+                        KeyCode::End => choices.len().saturating_sub(1) as isize - index as isize,
+                        _ => 0,
+                    };
+                    if delta != 0 {
+                        index = index
+                            .saturating_add_signed(delta)
+                            .min(choices.len().saturating_sub(1));
+                    } else {
+                        match key.code {
+                            KeyCode::Char(c)
+                                if !key
+                                    .modifiers
+                                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                            {
+                                query.push(c);
+                                index = 0;
+                            }
+                            KeyCode::Backspace => {
+                                query.truncate(previous_boundary(&query, query.len()));
+                                index = 0;
+                            }
+                            _ => {}
+                        }
+                    }
                     Modal::EmojiPicker {
                         token,
                         purpose,
@@ -5910,6 +5971,59 @@ mod tests {
             );
             assert_eq!(action_labels(&app)[2].1, allowed);
         }
+    }
+    #[test]
+    fn emoji_picker_displays_a_grid_and_arrows_and_mouse_select_the_same_cells() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("face.png");
+        image::RgbaImage::from_pixel(4, 4, image::Rgba([255, 0, 0, 255]))
+            .save(&path)
+            .unwrap();
+        let mut app = App::new(Config::default());
+        app.modal = Modal::EmojiPicker {
+            token: uuid::Uuid::new_v4(),
+            purpose: EmojiPurpose::Send,
+            items: (0..40)
+                .map(|i| Sticker {
+                    id: i.to_string(),
+                    name: format!("表情{i}"),
+                    kind: "sticker".into(),
+                    path: path.to_string_lossy().into_owned(),
+                    emoji_id: String::new(),
+                    emoji_type: String::new(),
+                })
+                .collect(),
+            query: String::new(),
+            index: 0,
+        };
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
+        let mut media = media::Media::new(ratatui_image::picker::Picker::halfblocks());
+        let mut images = 0;
+        terminal
+            .draw(|frame| {
+                images = crate::ui::draw(frame, &mut app, &mut media).images.len();
+            })
+            .unwrap();
+        assert!(images >= 12);
+        assert!(app.hit_regions.emoji_columns > 1);
+        app.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert!(
+            matches!(&app.modal, Modal::EmojiPicker {index, query, ..} if *index == app.hit_regions.emoji_columns && query.is_empty())
+        );
+        let (cell, selected) = app.hit_regions.emoji_cells[2];
+        app.terminal(TerminalEvent::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: cell.x + 1,
+            row: cell.y + 1,
+            modifiers: KeyModifiers::NONE,
+        }));
+        assert!(matches!(&app.modal, Modal::EmojiPicker {index, ..} if *index == selected));
+        app.key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert!(
+            matches!(&app.modal, Modal::EmojiPicker {query, index, ..} if query == "j" && *index == 0)
+        );
     }
     fn peer(uid: &str) -> Peer {
         Peer {

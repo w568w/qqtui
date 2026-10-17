@@ -783,7 +783,7 @@ def main():
             choose_chat("Other fixture")
             wait_for(lambda:"other-chat-content" in screen())
             keys("ctrl+e")
-            wait_for(lambda:"Animated favorite" in screen() and "预览" in screen())
+            wait_for(lambda:"Animated favorite" in screen() and "表情包" in screen())
             keys("enter")
             wait_for(lambda:"Animated favorite" in screen() and "INSERT" in screen())
             assert not any(m=="messages.send" for m,_ in server.calls),"Picking a sticker sent it before the send key"

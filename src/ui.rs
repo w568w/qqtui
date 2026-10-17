@@ -26,6 +26,8 @@ pub struct HitRegions {
     pub message_area: Rect,
     pub messages: Vec<(Rect, String)>,
     pub composer: Rect,
+    pub emoji_columns: usize,
+    pub emoji_cells: Vec<(Rect, usize)>,
 }
 #[derive(Default)]
 pub struct DrawWork {
@@ -1102,6 +1104,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, media: &mut Media) -> DrawWork {
             media,
             &mut work,
             details_sidebar.then_some(details_area),
+            &mut hits,
         );
     }
     app.hit_regions = hits;
@@ -1141,6 +1144,7 @@ fn draw_modal(
     media: &mut Media,
     work: &mut DrawWork,
     sidebar: Option<Rect>,
+    hits: &mut HitRegions,
 ) {
     let area = frame.area();
     let width = (area.width.saturating_mul(4) / 5).clamp(1, 90);
@@ -1170,7 +1174,7 @@ fn draw_modal(
     } = &app.modal
     {
         let title = if matches!(purpose, EmojiPurpose::Send) {
-            " 表情包 · Enter 草稿 · Ctrl+F 本地文件 · Esc 关闭 "
+            " 表情包 · 方向键选择 · 输入搜索 · Enter 草稿 · Ctrl+F 本地文件 · Esc 关闭 "
         } else {
             " 选择回应 · Enter 添加／取消 · Esc 关闭 "
         };
@@ -1183,32 +1187,42 @@ fn draw_modal(
             Paragraph::new(format!("> {}", safe_text(query))),
             query_area,
         );
-        let [list, preview] =
-            Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
-                .areas(body);
         let choices = sticker_choices(items, query);
-        let mut state = ListState::default().with_selected(Some(*index));
-        frame.render_stateful_widget(
-            List::new(choices.iter().map(|sticker| {
-                ListItem::new(format!(
-                    "{} {}",
-                    if sticker.kind == "sticker" {
-                        "收藏"
-                    } else {
-                        "表情"
-                    },
-                    safe_text(&sticker.name)
-                ))
-            }))
-            .highlight_symbol("▸ ")
-            .highlight_style(Style::default().fg(CYAN).add_modifier(Modifier::BOLD)),
-            list,
-            &mut state,
-        );
-        if let Some(sticker) = choices.get(*index) {
-            let block = panel(" 预览 ".into(), false);
-            let image_area = block.inner(preview);
-            frame.render_widget(block, preview);
+        let [body, caption] =
+            Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(body);
+        if let Some(selected) = choices.get(*index) {
+            frame.render_widget(
+                Paragraph::new(format!(
+                    "{}/{} · {}",
+                    *index + 1,
+                    choices.len(),
+                    safe_text(&selected.name)
+                )),
+                caption,
+            );
+        }
+        let columns = (body.width / 12).max(1) as usize;
+        let rows = (body.height / 6).max(1) as usize;
+        hits.emoji_columns = columns;
+        hits.emoji_cells.clear();
+        let start = (*index / columns).saturating_sub(rows - 1) * columns;
+        for (i, sticker) in choices.iter().enumerate().skip(start).take(columns * rows) {
+            let offset = i - start;
+            let cell = Rect::new(
+                body.x + (offset % columns) as u16 * (body.width / columns as u16),
+                body.y + (offset / columns) as u16 * 6,
+                body.width / columns as u16,
+                6.min(body.height),
+            );
+            hits.emoji_cells.push((cell, i));
+            let block = Block::default().borders(Borders::ALL).border_style(
+                Style::default().fg(if i == *index { CYAN } else { Color::DarkGray }),
+            );
+            let inner = block.inner(cell);
+            frame.render_widget(block, cell);
+            let [image_area, label] =
+                Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(inner);
+            frame.render_widget(Paragraph::new(safe_text(&sticker.name)), label);
             if !sticker.path.is_empty() && std::path::Path::new(&sticker.path).is_file() {
                 image_preview(
                     frame,
@@ -1219,7 +1233,7 @@ fn draw_modal(
                         width: image_area.width,
                         height: image_area.height,
                         upscale: true,
-                        animate: true,
+                        animate: false,
                     },
                     image_area,
                 );
@@ -1228,7 +1242,7 @@ fn draw_modal(
                 frame.render_widget(
                     Paragraph::new(error.map(String::as_str).unwrap_or(
                         if sticker.kind == "sticker" {
-                            "正在读取表情…"
+                            "加载中…"
                         } else {
                             &sticker.name
                         },
