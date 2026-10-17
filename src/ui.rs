@@ -1643,13 +1643,18 @@ fn draw_modal(
                 .map(|c| {
                     (
                         format!(
-                            "{} {}",
+                            "{} {}{}",
                             if c.peer.chat_type == 2 {
                                 "群"
                             } else {
                                 "好友"
                             },
-                            c.name
+                            c.name,
+                            if c.unread == "0" {
+                                String::new()
+                            } else {
+                                format!("  {}", c.unread)
+                            }
                         ),
                         true,
                     )

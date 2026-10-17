@@ -1414,6 +1414,9 @@ impl App {
                     if let Some(peer) = conversation {
                         self.focus = Focus::Conversations;
                         self.sidebar_cursor = Some(peer.clone());
+                        if peer.chat_type == 7 {
+                            return self.activate_conversation(peer);
+                        }
                         return vec![Action::Select(peer)];
                     }
                     if self.hit_regions.composer.contains(point) {
@@ -1478,6 +1481,25 @@ impl App {
             .clone(),
         );
     }
+    fn activate_conversation(&mut self, peer: Peer) -> Vec<Action> {
+        if let Some(c) = find_conversation(&self.conversations, &peer) {
+            if !c.children.is_empty() {
+                self.modal = Modal::Contacts {
+                    query: String::new(),
+                    index: 0,
+                    items: c.children.clone(),
+                };
+            } else if peer.chat_type == 7 {
+                return vec![Action::Select(peer), Action::Folder];
+            } else {
+                self.focus = Focus::Messages;
+                if self.selected_peer.as_ref() != Some(&peer) {
+                    return vec![Action::Select(peer)];
+                }
+            }
+        }
+        vec![]
+    }
     fn key(&mut self, mut key: KeyEvent) -> Vec<Action> {
         if key.modifiers.contains(KeyModifiers::SHIFT)
             && let KeyCode::Char(c) = key.code
@@ -1525,23 +1547,8 @@ impl App {
                 self.selected_peer.as_ref()
             }
             .cloned();
-            if let Some(peer) = target
-                && let Some(c) = find_conversation(&self.conversations, &peer)
-            {
-                if !c.children.is_empty() {
-                    self.modal = Modal::Contacts {
-                        query: String::new(),
-                        index: 0,
-                        items: c.children.clone(),
-                    };
-                } else if peer.chat_type == 7 {
-                    return vec![Action::Select(peer), Action::Folder];
-                } else {
-                    self.focus = Focus::Messages;
-                    if self.selected_peer.as_ref() != Some(&peer) {
-                        return vec![Action::Select(peer)];
-                    }
-                }
+            if let Some(peer) = target {
+                return self.activate_conversation(peer);
             }
             return vec![];
         }
@@ -5812,6 +5819,58 @@ impl Drop for TerminalGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn mouse_opens_group_folder_and_folder_rows_show_unread_counts() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let mut app = App::new(Config::default());
+        let folder = Peer {
+            chat_type: 7,
+            uid: "folder".into(),
+        };
+        let child = Conversation {
+            name: "未读群".into(),
+            unread: "12".into(),
+            ..conversation("group")
+        };
+        app.conversations = vec![Conversation {
+            peer: folder.clone(),
+            children: vec![child],
+            ..conversation("folder")
+        }];
+        let rect = ratatui::layout::Rect::new(0, 0, 20, 1);
+        app.hit_regions.conversations = vec![(rect, folder)];
+        assert!(
+            app.terminal(TerminalEvent::Mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 1,
+                row: 0,
+                modifiers: KeyModifiers::NONE
+            }))
+            .is_empty()
+        );
+        assert!(matches!(app.modal, Modal::Contacts { .. }));
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
+        let mut media = media::Media::new(ratatui_image::picker::Picker::halfblocks());
+        terminal
+            .draw(|frame| {
+                crate::ui::draw(frame, &mut app, &mut media);
+            })
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(
+            rendered
+                .split_whitespace()
+                .collect::<String>()
+                .contains("未读群12")
+        );
+    }
     fn peer(uid: &str) -> Peer {
         Peer {
             chat_type: 1,
