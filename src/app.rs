@@ -3100,6 +3100,29 @@ impl Controller {
                             app.dirty = true;
                         }
                     }
+                    "notices.updated" => {
+                        let mut changed = vec![];
+                        for update in event.messages {
+                            if let Some(message) = app
+                                .chats
+                                .get_mut(&update.peer)
+                                .and_then(|c| c.messages.iter_mut().find(|m| m.id == update.id))
+                                && message.is_notice()
+                                && message.recalled == update.recalled
+                            {
+                                message.text = update.text;
+                                message.parts = update.parts;
+                                message.notice_names = update.notice_names;
+                                message.touch();
+                                changed.push(message.clone());
+                            }
+                        }
+                        let store = self.store.clone();
+                        tokio::spawn(async move {
+                            let _ = store.save_messages(changed).await;
+                        });
+                        app.dirty = true;
+                    }
                     "reactions.updated" => {
                         let mut changed = vec![];
                         for update in event.messages {

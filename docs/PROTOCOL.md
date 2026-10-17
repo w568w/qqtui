@@ -40,7 +40,7 @@
 
 会话记录包含 peer、id、name、unread 字符串、pinned、preview、last_id 和 children。顺序沿用原生 sortedContactList，置顶来自 topFlag，摘要来自 abstractContent。
 
-消息记录包含 account、peer、id、seq、time、sender、sender_uid、is_self、text、attachments、reply_to、reply_seq、send_status、correlation，以及 recalled 状态。新增可选 parts 按原生顺序保存文字与附件引用；forward 保存合并转发卡片的 XML。原生历史中的撤回灰条也会转换为 recalled，正文统一显示“消息已撤回”，清除附件与引用；不依赖此前收到实时撤回事件。附件包含 element_id、kind、name、path、size；草稿附件可带仅供本地显示的 display_name。
+消息记录包含 account、peer、id、seq、time、sender、sender_uid、is_self、text、attachments、reply_to、reply_seq、send_status、correlation，以及 recalled 状态。notice_names 保存按 UID／QQ 号查询得到的通知参与者名称；新增可选 parts 按原生顺序保存文字与附件引用；forward 保存合并转发卡片的 XML。原生历史中的撤回灰条也会转换为 recalled，正文显示原生撤回操作者和可用提示，清除附件与引用；不依赖此前收到实时撤回事件。附件包含 element_id、kind、name、path、size；草稿附件可带仅供本地显示的 display_name。
 
 商城表情提供 image 附件，media.resolve 依据原生 emojiId 读取 QQ 公共资源并缓存在私有状态目录。
 
@@ -62,6 +62,7 @@ receipt 包含 request_id、account、peer、native_id、message_id、state 和�
 - message.recalled：携带 message_peer 和原生 message_seq，清除对应消息正文、附件及引用。
 - messages.invalidated：重新读取当前会话消息。
 - send.updated：携带 receipt。
+- notices.updated：只更新对应通知的文字、parts 和 notice_names，不覆盖消息或回应状态。
 - reactions.updated：只更新 messages 中对应消息的回应字段，保持正文。
 - stickers.invalidated：QQ 表情资源更新，选择器需重新读取目录。
 - status：宿主登录或在线状态变化。

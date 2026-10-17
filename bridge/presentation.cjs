@@ -45,6 +45,8 @@ class Presentation {
     this.pending = new Map();
     this.avatarRequests = new Map();
     this.selfMembers = new Map();
+    this.nameLists = new Map();
+    this.nameRequests = new Map();
   }
   update(groups) {
     for (const group of groups || []) {
@@ -75,6 +77,7 @@ class Presentation {
     this.waiters.delete(id);
   }
   member(group, members) {
+    this.nameLists.delete(String(group));
     const me =
       members instanceof Map
         ? members.get(this.owner.selfUid)
@@ -137,6 +140,66 @@ class Presentation {
       if (this.pending.get(id) === work) this.pending.delete(id);
     }
   }
+  async messageNames(raws) {
+    const notices = raws.filter(raw => (raw.elements || []).some(e => e.grayTipElement));
+    if (!notices.length) return new Map();
+    const groups = [...new Set(notices.filter(raw => raw.chatType === 2).map(raw => String(raw.peerUid)))];
+    const result = new Map();
+    const known = Object.create(null);
+    for (const contact of this.owner.contacts.values()) {
+      const name = contact.remark || contact.peerName;
+      if (!name) continue;
+      known[String(contact.peerUid)] = name;
+      if (contact.peerUin) known[String(contact.peerUin)] = name;
+    }
+    for (const raw of raws) {
+      const name = raw.sendMemberName || raw.sendNickName;
+      const key = String(raw.peerUid);
+      if (!result.has(key)) result.set(key, { ...known });
+      const local = result.get(key);
+      if (name) {
+        local[String(raw.senderUid)] = name;
+        if (raw.senderUin) local[String(raw.senderUin)] = name;
+      }
+    }
+    await Promise.all(groups.map(async id => {
+      try { result.set(id, { ...result.get(id), ...await this.groupNames(id) }); } catch (_) {}
+    }));
+    return result;
+  }
+  async groupNames(id) {
+    const cached = this.nameLists.get(id);
+    if (cached && Date.now() - cached.time < 60000) return cached.names;
+    if (this.nameRequests.has(id)) return this.nameRequests.get(id);
+    const context = this.owner.sessionContext();
+    const service = context.session.getGroupService?.();
+    if (!service?.getAllMemberList || this.nameRequests.size >= 4) return {};
+    let timer;
+    const request = Promise.race([
+      Promise.resolve(service.getAllMemberList(id, true)),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("群成员资料读取超时")), 5000); }),
+    ]).then(value => {
+      context.check();
+      const infos = value?.result?.infos || value?.infos;
+      const names = Object.create(null);
+      let count = 0;
+      for (const [uid, member] of infos || []) {
+        const name = member.cardName || member.nick;
+        if (!name) continue;
+        names[String(uid)] = String(name);
+        if (member.uin) names[String(member.uin)] = String(name);
+        if (++count >= 4096) break;
+      }
+      if (this.nameLists.size >= 8) this.nameLists.delete(this.nameLists.keys().next().value);
+      if (count > 0) this.nameLists.set(id, { names, time: Date.now() });
+      return names;
+    }).finally(() => {
+      clearTimeout(timer);
+      if (this.nameRequests.get(id) === request) this.nameRequests.delete(id);
+    });
+    this.nameRequests.set(id, request);
+    return request;
+  }
   async avatar(uid) {
     if (this.avatarRequests.has(uid)) return this.avatarRequests.get(uid);
     if (this.avatarRequests.size >= 8) throw new Error("头像查询队列已满");
@@ -180,6 +243,8 @@ class Presentation {
     this.pending.clear();
     this.avatarRequests.clear();
     this.selfMembers.clear();
+    this.nameLists.clear();
+    this.nameRequests.clear();
   }
 }
 module.exports = { Presentation, permission };

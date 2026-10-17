@@ -78,7 +78,7 @@ test('recalled native history is redacted without a prior live recall event', ()
   ] };
   const m = message(raw, '123');
   assert.equal(m.recalled, true);
-  assert.equal(m.text, '消息已撤回');
+  assert.equal(m.text, '对方撤回了一条消息：因为有错别字。\t');
   assert.deepEqual(m.attachments, []);
   assert.equal(m.reply_to, null);
   raw.elements = [{ grayTipElement: { subElementType: 17, jsonGrayTipElement: { recentAbstract: 'system notice' } } }];
@@ -623,4 +623,23 @@ test('upload preparation creates only the native target directory and reports a 
   await b.send(request,nativePeer(peer));assert.equal(fs.readFileSync(destination,'utf8'),'image bytes');assert.equal(count(),1);
   b.msg.getRichMediaFilePathForGuild=()=>{fs.unlinkSync(source);return destination;};
   const failed=await b.call('messages.send',{...request,request_id:'missing-source'},{});assert.equal(failed.state,'failed');assert.match(failed.error,/重新选择附件/);assert.equal(count(),1);
+});
+
+test('native group names resolve reaction actors, poke participants and recall operators with shared bounded queries', async t => {
+  const {b}=fixture(t);let queries=0;
+  b.session.getGroupService=()=>({getAllMemberList:async(_id,force)=>{assert.equal(force,true);queries++;return {result:{infos:new Map([
+    ['u_actor',{uin:'456',cardName:'群名片',nick:'昵称'}],['u_target',{uin:'789',nick:'朋友'}],
+  ])}};}});
+  const base={chatType:2,peerUid:'100',senderUid:'u_target',senderUin:'789'};
+  const raws=[
+    {...base,msgId:'1',elements:[{grayTipElement:{xmlElement:{templId:'10382',content:'<gtip><qq uin="u_actor" jp="456"/><url msgseq="42"/></gtip>'}}}]},
+    {...base,msgId:'2',elements:[{grayTipElement:{jsonGrayTipElement:{recentAbstract:'456拍了拍789',jsonStr:JSON.stringify({items:[{type:'qq',uid:'u_actor',txt:'456'},{txt:'拍了拍'},{type:'qq',uid:'u_target',txt:'789'}]})}}}]},
+    {...base,msgId:'3',elements:[{grayTipElement:{subElementType:1,revokeElement:{operatorUid:'u_actor',operatorNick:'456'}}}]},
+  ];
+  const [messages]=await Promise.all([b.normalizeMessages(raws),b.normalizeMessages(raws)]);
+  assert.equal(queries,1);assert.equal(messages[0].notice_names.u_actor,'群名片');
+  assert.equal(messages[1].text,'群名片拍了拍朋友');assert.equal(messages[2].text,'群名片撤回了一条消息');
+  await b.normalizeMessages(raws);assert.equal(queries,1);
+  b.presentation.member('100',new Map());await b.normalizeMessages(raws);assert.equal(queries,2);
+  b.presentation.close();assert.equal(b.presentation.nameLists.size,0);
 });

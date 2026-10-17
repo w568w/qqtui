@@ -60,20 +60,26 @@ function checked(result) {
 function cleanText(value) {
   return String(value ?? "").replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
 }
-function grayTipText(tip) {
+function grayTipText(tip, names = {}, raw = {}) {
+  const revoke = tip.revokeElement;
+  if (revoke || tip.subElementType === 1) {
+    const actor = revoke?.isSelfOperate ? "你" :
+      revoke?.operatorMemRemark || revoke?.operatorRemark || names[revoke?.operatorUid] || revoke?.operatorNick ||
+      names[raw.senderUid] || raw.sendMemberName || raw.sendNickName || raw.senderUin || "对方";
+    return cleanText(`${actor}撤回了一条消息${revoke?.wording ? "：" + revoke.wording : ""}`);
+  }
   const jsonTip = tip.jsonGrayTipElement;
-  if (jsonTip?.recentAbstract) return cleanText(jsonTip.recentAbstract);
   if (typeof jsonTip?.jsonStr === "string" && jsonTip.jsonStr.length <= 65536) {
     try {
       const data = JSON.parse(jsonTip.jsonStr);
       if (Array.isArray(data.items))
         return (
-          data.items.map((item) => cleanText(item.txt || "")).join("") ||
-          "[系统消息]"
+          data.items.map((item) => cleanText(names[item.uid] || names[item.uin] || item.txt || "")).join("") ||
+          cleanText(jsonTip.recentAbstract) || "[系统消息]"
         );
     } catch (_) {}
   }
-  return cleanText(tip.revokeElement?.wording || "[系统消息]");
+  return cleanText(jsonTip?.recentAbstract || "[系统消息]");
 }
 function mailText(element) {
   const data = element.bytesData;
@@ -100,7 +106,7 @@ function mailText(element) {
     return "[QQ 邮箱提醒]";
   }
 }
-function message(raw, account, resources = new QqResources()) {
+function message(raw, account, resources = new QqResources(), names = {}) {
   const recalled = (raw.elements ?? []).some(
     (e) =>
       e.grayTipElement?.subElementType === 1 || e.grayTipElement?.revokeElement,
@@ -203,12 +209,13 @@ function message(raw, account, resources = new QqResources()) {
       text += "[表情回应]";
     } else {
       const content = e.grayTipElement
-        ? grayTipText(e.grayTipElement)
+        ? grayTipText(e.grayTipElement, names, raw)
         : `[消息类型 ${e.elementType}]`;
       text += content;
       parts.push({ type: "text", text: content });
     }
   }
+  const noticeSource = json((raw.elements || []).filter(e => e.grayTipElement));
   return {
     account,
     peer: { chat_type: raw.chatType, uid: String(raw.peerUid) },
@@ -238,7 +245,12 @@ function message(raw, account, resources = new QqResources()) {
         })),
     system_notice: (raw.elements || []).some((e) => e.grayTipElement),
     reaction_notice: recalled ? null : reaction_notice,
-    text: recalled ? "消息已撤回" : text,
+    notice_names: Object.fromEntries(Object.entries(names).filter(([uid]) =>
+      uid && uid !== "0" && noticeSource.includes(uid)
+    ).slice(0, 64)),
+    text: recalled ? (raw.elements || []).filter(e => e.grayTipElement &&
+      (e.grayTipElement.revokeElement || e.grayTipElement.subElementType === 1))
+      .map(e => grayTipText(e.grayTipElement, names, raw)).join("") : text,
     parts: recalled ? [] : parts,
     forward: recalled ? null : forward,
     attachments: recalled ? [] : attachments,
@@ -490,6 +502,12 @@ class NativeBridge {
     }
     return raws;
   }
+  async normalizeMessages(raws, context = this.sessionContext()) {
+    context.check();
+    const groups = await this.presentation.messageNames(raws);
+    context.check();
+    return raws.map(raw => message(raw, context.account, this.resources, groups.get(String(raw.peerUid))));
+  }
   async messagesBySequence(peer, seq) {
     const context = this.sessionContext();
     const msg = context.msg;
@@ -506,6 +524,7 @@ class NativeBridge {
       (raw) => String(raw.msgSeq) === seq,
     );
   }
+
   subscribe() {
     if (this.active || this.phase !== "ready") return;
     const add = (service, method, remove, handlers) => {
@@ -857,6 +876,11 @@ class NativeBridge {
         Array.isArray(raws[i].emojiLikesList),
     );
     if (complete.length) this.event("messages", { messages: complete });
+    if (complete.some(m => m.system_notice)) {
+      this.normalizeMessages(raws.filter(raw => routable(raw) && Array.isArray(raw.elements)))
+        .then(messages => this.event("notices.updated", { messages: messages.filter(m => m.system_notice) }))
+        .catch(error => console.error("[qqtui] notice names:", error.message));
+    }
     if (partial.length) this.event("reactions.updated", { messages: partial });
     if (complete.length + partial.length < messages.length)
       this.event("messages.invalidated");
@@ -1120,6 +1144,7 @@ class NativeBridge {
       throw new Error("QQ is waiting for login / initialization");
     if (p.account !== this.account)
       throw new Error("Account changed; refresh the session");
+    const context = this.sessionContext();
     if (
       method !== "messages.send" &&
       ([
@@ -1369,9 +1394,7 @@ class NativeBridge {
         throw new Error("Group message sequence required");
       const raws = await this.messagesBySequence(peer, p.seq);
       return {
-        messages: raws
-          .filter((raw) => String(raw.msgSeq) === p.seq)
-          .map((raw) => message(raw, this.account, this.resources)),
+        messages: await this.normalizeMessages(raws, context),
       };
     }
     if (method === "reactions.set" || method === "reactions.members") {
@@ -1438,22 +1461,14 @@ class NativeBridge {
     if (method === "messages.forward") {
       const raws = await this.forwardMessages(peer, p.path);
       return {
-        messages: raws.map((raw) => ({
-          ...message(
-            { ...raw, chatType: peer.chatType, peerUid: peer.peerUid },
-            this.account,
-            this.resources,
-          ),
-          forward_path: p.path,
-        })),
+        messages: (await this.normalizeMessages(raws.map(raw => ({ ...raw, chatType: peer.chatType, peerUid: peer.peerUid })), context))
+          .map(raw => ({ ...raw, forward_path: p.path })),
       };
     }
     if (method === "messages.sequence") {
       if (!isNativeId(p.seq)) throw new Error("Message sequence required");
       return {
-        messages: (await this.messagesBySequence(peer, p.seq)).map((raw) =>
-          message(raw, this.account, this.resources),
-        ),
+        messages: await this.normalizeMessages(await this.messagesBySequence(peer, p.seq), context),
       };
     }
     if (method === "messages.quote") {
@@ -1481,9 +1496,7 @@ class NativeBridge {
         originals = await this.messagesBySequence(peer, seq);
       }
       return {
-        messages: originals.map((raw) =>
-          message(raw, this.account, this.resources),
-        ),
+        messages: await this.normalizeMessages(originals, context),
       };
     }
     if (method === "messages.get") {
@@ -1496,9 +1509,7 @@ class NativeBridge {
         throw new Error("Message IDs required");
       const result = checked(await this.msg.getMsgsByMsgId(peer, p.ids));
       return {
-        messages: (result.msgList || []).map((raw) =>
-          message(raw, this.account, this.resources),
-        ),
+        messages: await this.normalizeMessages(result.msgList || [], context),
       };
     }
     if (method === "messages.history") {
@@ -1558,7 +1569,7 @@ class NativeBridge {
         }
       }
       return {
-        messages: raws.map((raw) => message(raw, this.account, this.resources)),
+        messages: await this.normalizeMessages(raws, context),
         has_before,
         has_after,
         anchor_found,

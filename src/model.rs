@@ -115,6 +115,8 @@ pub struct Message {
     #[serde(default)]
     pub reaction_notice: Option<String>,
     #[serde(default)]
+    pub notice_names: std::collections::HashMap<String, String>,
+    #[serde(default)]
     pub system_notice: bool,
     #[serde(default)]
     pub attachments: Vec<Attachment>,
@@ -153,6 +155,11 @@ impl Message {
                 .sum::<usize>()
             + self.forward.as_ref().map_or(0, String::len)
             + self.reaction_notice.as_ref().map_or(0, String::len)
+            + self
+                .notice_names
+                .iter()
+                .map(|(uid, name)| uid.len() + name.len() + 64)
+                .sum::<usize>()
             + 512
     }
     pub fn media_key(&self, element: &str) -> String {
@@ -184,7 +191,17 @@ impl Message {
         }
         let user = doc.descendants().find(|n| n.has_tag_name("qq"));
         let actor = user
-            .and_then(|n| n.attribute("nm").or(n.text()).or(n.attribute("jp")))
+            .and_then(|n| {
+                n.attribute("uin")
+                    .and_then(|uid| self.notice_names.get(uid).map(String::as_str))
+                    .or_else(|| {
+                        n.attribute("jp")
+                            .and_then(|uin| self.notice_names.get(uin).map(String::as_str))
+                    })
+                    .or(n.attribute("nm"))
+                    .or(n.text())
+                    .or(n.attribute("jp"))
+            })
             .unwrap_or("有人");
         Some(ReactionNotice {
             seq: seq.into(),
@@ -255,7 +272,11 @@ impl Message {
     pub fn retract(&mut self) {
         self.touch();
         self.recalled = true;
-        self.text = "消息已撤回".into();
+        self.text = if self.sender.is_empty() {
+            "消息已撤回".into()
+        } else {
+            format!("{}的消息已被撤回", self.sender)
+        };
         self.attachments.clear();
         self.parts.clear();
         self.forward = None;
@@ -433,10 +454,14 @@ mod tests {
     use super::*;
     #[test]
     fn reaction_notices_parse_exact_sequences_and_never_render_as_generic_system_messages() {
-        let message=Message {reaction_notice:Some("<gtip><qq jp=\"123\" nm=\"Alice &amp; Bob\"/><url msgseq=\"18446744073709551615\"/><face id=\"76\"/></gtip>".into()),..Default::default()};
+        let mut message=Message {reaction_notice:Some("<gtip><qq uin=\"u_actor\" jp=\"123\" nm=\"Alice &amp; Bob\"/><url msgseq=\"18446744073709551615\"/><face id=\"76\"/></gtip>".into()),..Default::default()};
         let notice = message.reaction_reference().unwrap();
         assert_eq!(notice.seq, "18446744073709551615");
         assert_eq!(notice.actor, "Alice & Bob");
+        message
+            .notice_names
+            .insert("u_actor".into(), "群名片".into());
+        assert_eq!(message.reaction_reference().unwrap().actor, "群名片");
         assert!(
             matches!(message.render_parts().as_slice(),[MessagePart::Text {text}] if text.contains("表情回应") && !text.contains("系统消息"))
         );
