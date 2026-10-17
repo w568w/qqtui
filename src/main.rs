@@ -61,11 +61,22 @@ enum BackendCommand {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let base = Paths::discover()?;
-    let paths = match cli.account.as_deref() {
+    let mut paths = match cli.account.as_deref() {
         None | Some("default") => base.clone(),
         Some(account) if matches!(cli.command, Some(Command::Host)) => base.for_account(account)?,
         Some(account) => accounts::resolve(&base, account).await?,
     };
+    if cli.account.is_none()
+        && matches!(
+            cli.command,
+            Some(Command::Backend { .. } | Command::Status | Command::Doctor)
+        )
+    {
+        let Some(selected) = accounts::choose_backend(&base).await? else {
+            return Ok(());
+        };
+        paths = selected;
+    }
     match cli.command {
         None => {
             if cli.account.is_none() {

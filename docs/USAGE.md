@@ -29,7 +29,7 @@
 
 每个窗口使用一个账号；再开一个终端运行 `qqtui`，即可选择其他账号。也可用 `qqtui --account <QQ号>` 直接打开。
 
-退出 TUI 后 QQ 继续在线。需要停止后台时运行 `qqtui backend stop`；需要打开 QQ 登录页面时运行 `qqtui backend view`。指定账号时加 `--account <QQ号>`。
+退出 TUI 后 QQ 继续在线。需要停止后台时运行 `qqtui backend stop`；需要打开 QQ 登录页面时运行 `qqtui backend view`。多账号时，后台操作会先让你选择账号；加 `--account <QQ号>` 可直接指定。
 
 启动遇到问题，先运行 `qqtui doctor` 检查，再用 `qqtui backend logs -f` 查看日志。其他命令见 `qqtui --help`。
 

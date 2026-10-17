@@ -135,6 +135,21 @@ impl Drop for Terminal {
 
 pub async fn choose(base: &Paths) -> Result<Option<Paths>> {
     let accounts = list(base).await;
+    pick(base, accounts, false).await
+}
+
+pub async fn choose_backend(base: &Paths) -> Result<Option<Paths>> {
+    let accounts = list(base).await;
+    if accounts.len() == 1 {
+        return Ok(Some(match &accounts[0].account {
+            Some(account) => base.for_account(account)?,
+            None => base.clone(),
+        }));
+    }
+    pick(base, accounts, true).await
+}
+
+async fn pick(base: &Paths, accounts: Vec<Account>, backend: bool) -> Result<Option<Paths>> {
     let mut terminal = ratatui::init();
     let _restore = Terminal;
     let mut events = EventStream::new();
@@ -146,7 +161,7 @@ pub async fn choose(base: &Paths) -> Result<Option<Paths>> {
         terminal.draw(|frame| {
             let vertical = Layout::vertical([Constraint::Length(14)]).flex(Flex::Center).split(frame.area())[0];
             let area = Layout::horizontal([Constraint::Length(64)]).flex(Flex::Center).split(vertical)[0];
-            let block = Block::default().borders(Borders::ALL).title(" 选择 QQ 账号 · 每个窗口一个账号 ");
+            let block = Block::default().borders(Borders::ALL).title(if backend { " 选择 QQ 宿主 " } else { " 选择 QQ 账号 · 每个窗口一个账号 " });
             let inner = block.inner(area);
             frame.render_widget(block, area);
             let sections = Layout::vertical([Constraint::Min(1),Constraint::Length(3)]).split(inner);
@@ -154,10 +169,10 @@ pub async fn choose(base: &Paths) -> Result<Option<Paths>> {
                 frame.render_widget(Paragraph::new(format!("\n QQ 号：{input}\n\n {error}\n\n 沿用原 QQ 聊天数据；登录验证通过 QQ 查看器完成。")),sections[0]);
             } else {
                 let rows = accounts.iter().map(|account|ListItem::new(format!(" {}   [{}]",account.name,account.phase)))
-                    .chain(std::iter::once(ListItem::new(" ＋ 添加账号")));
+                    .chain((!backend).then_some(ListItem::new(" ＋ 添加账号")));
                 frame.render_stateful_widget(List::new(rows).highlight_style(Style::default().fg(Color::Cyan)).highlight_symbol("› "),sections[0],&mut state);
             }
-            frame.render_widget(Paragraph::new(vec![Line::from(if adding {" Enter 确认 · Esc 返回"}else{" j/k 或 ↑/↓ 选择 · Enter 打开 · a 添加 · q 退出"}),Line::from(" 关闭窗口后 QQ 仍保持在线。")]),sections[1]);
+            frame.render_widget(Paragraph::new(vec![Line::from(if adding {" Enter 确认 · Esc 返回"}else if backend {" j/k 或 ↑/↓ 选择 · Enter 确认 · q 退出"}else{" j/k 或 ↑/↓ 选择 · Enter 打开 · a 添加 · q 退出"}),Line::from(" 关闭窗口后 QQ 仍保持在线。")]),sections[1]);
         })?;
         let Some(event) = events.next().await else {
             return Ok(None);
@@ -204,12 +219,12 @@ pub async fn choose(base: &Paths) -> Result<Option<Paths>> {
             let index = state.selected().unwrap_or(0);
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => return Ok(None),
-                KeyCode::Char('a') => adding = true,
+                KeyCode::Char('a') if !backend => adding = true,
                 KeyCode::Down | KeyCode::Char('j') => {
-                    state.select(Some((index + 1).min(accounts.len())))
+                    state.select(Some((index + 1).min(accounts.len() - usize::from(backend))))
                 }
                 KeyCode::Up | KeyCode::Char('k') => state.select(Some(index.saturating_sub(1))),
-                KeyCode::Enter if index == accounts.len() => adding = true,
+                KeyCode::Enter if index == accounts.len() && !backend => adding = true,
                 KeyCode::Enter => {
                     return Ok(Some(match &accounts[index].account {
                         Some(account) => base.for_account(account)?,

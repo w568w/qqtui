@@ -18,7 +18,7 @@ try:
     for _ in range(35):
         if host.poll() is not None:
             break
-        p = subprocess.run([entry, "status"], capture_output=True, text=True)
+        p = subprocess.run([entry, "--account", "default", "status"], capture_output=True, text=True)
         if p.returncode == 0:
             status = json.loads(p.stdout)
             if status["phase"] in ["login", "ready", "incompatible"]:
@@ -94,7 +94,7 @@ try:
 
     assert (pathlib.Path("/run/user/1000/qqtui/Xauthority")).is_file()
     viewer = subprocess.Popen(
-        [entry, "backend", "view", "--no-open"],
+        [entry, "--account", "default", "backend", "view", "--no-open"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -155,7 +155,7 @@ try:
             )
         time.sleep(0.1)
     assert host.poll() is None, "Cancelled read-only clients killed QQ"
-    subprocess.run([entry, "status"], check=True, stdout=subprocess.DEVNULL)
+    subprocess.run([entry, "--account", "default", "status"], check=True, stdout=subprocess.DEVNULL)
     print("Cancelled RPC clients preserve host health: passed", flush=True)
     for component in ["Xvfb", "dbus-daemon", "qq"]:
         children = (
@@ -187,7 +187,7 @@ try:
                 if host.poll() is not None:
                     raise RuntimeError("Host failed to restart after " + component)
                 result = subprocess.run(
-                    [entry, "status"], capture_output=True, text=True
+                    [entry, "--account", "default", "status"], capture_output=True, text=True
                 )
                 if (
                     result.returncode == 0
