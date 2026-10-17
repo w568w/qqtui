@@ -721,6 +721,7 @@ pub enum Work {
         account: String,
         peer: Peer,
         seq: String,
+        complete: bool,
         result: Result<HistoryPage>,
     },
     Forward {
@@ -3059,7 +3060,9 @@ impl Controller {
                                     }
                                 }
                                 for message in &mut chat.messages {
-                                    if message.seq == event.message_seq {
+                                    if message.seq == event.message_seq
+                                        && (!message.is_notice() || message.recalled)
+                                    {
                                         message.retract();
                                         changed.push(message.clone());
                                     }
@@ -3216,7 +3219,9 @@ impl Controller {
         let ready = app.chats.get(&peer).and_then(|chat| {
             chat.messages
                 .iter()
-                .find(|m| Some(&m.id) == source.reply_to.as_ref())
+                .find(|m| {
+                    source.reaction_notice.is_none() && Some(&m.id) == source.reply_to.as_ref()
+                })
                 .cloned()
                 .or_else(|| match chat.quotes.get(&key) {
                     Some(QuoteState::Ready(message)) => Some(message.as_ref().clone()),
@@ -3273,7 +3278,11 @@ impl Controller {
                     .quoted_message(
                         account.clone(),
                         peer.clone(),
-                        source.reply_to.clone(),
+                        source
+                            .reply_to
+                            .as_ref()
+                            .filter(|_| source.reaction_notice.is_none())
+                            .cloned(),
                         source.reference_seq(),
                     )
                     .await?;
@@ -3445,20 +3454,32 @@ impl Controller {
         let tx = self.sender(app);
         let account = app.account.clone();
         tokio::spawn(async move {
-            let result = backend
-                .call(
-                    "reactions.refresh",
-                    json!({"account":account,"peer":peer,"seq":seq}),
-                )
-                .await;
-            let _ = tx
-                .send(Work::ReactionRefresh {
-                    account,
-                    peer,
-                    seq,
-                    result,
-                })
-                .await;
+            // QQ can deliver the gray tip before updating the original message.
+            for (attempt, delay) in [0, 250, 750, 1500].into_iter().enumerate() {
+                tokio::time::sleep(Duration::from_millis(delay)).await;
+                if !backend.is_alive() {
+                    break;
+                }
+                let result = backend
+                    .call(
+                        "reactions.refresh",
+                        json!({"account":account,"peer":peer,"seq":seq}),
+                    )
+                    .await;
+                if tx
+                    .send(Work::ReactionRefresh {
+                        account: account.clone(),
+                        peer: peer.clone(),
+                        seq: seq.clone(),
+                        complete: attempt == 3,
+                        result,
+                    })
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
         });
     }
     pub fn action(&self, app: &mut App, action: Action) {
@@ -4893,21 +4914,42 @@ fn apply_work(app: &mut App, controller: &mut Controller, store: &Store, work: W
             account,
             peer,
             seq,
+            complete,
             result,
         } => {
-            app.reaction_refreshes.remove(&(peer.clone(), seq));
+            if complete {
+                app.reaction_refreshes.remove(&(peer.clone(), seq));
+            }
             if account == app.account {
                 match result {
                     Ok(page) => {
                         if let Some(chat) = app.chats.get_mut(&peer) {
-                            chat.receive(page.messages.clone());
+                            for update in &page.messages {
+                                if let Some(message) = chat
+                                    .messages
+                                    .iter_mut()
+                                    .find(|m| m.id == update.id && !m.recalled)
+                                {
+                                    message.reactions = update.reactions.clone();
+                                    message.touch();
+                                }
+                            }
+                        }
+                        if let Modal::Reactions { message, .. } = &mut app.modal
+                            && let Some(update) = page
+                                .messages
+                                .iter()
+                                .find(|m| m.peer == message.peer && m.id == message.id)
+                        {
+                            message.reactions = update.reactions.clone();
                         }
                         let store = store.clone();
                         tokio::spawn(async move {
                             let _ = store.save_messages(page.messages).await;
                         });
                     }
-                    Err(e) => app.operation_error(&e),
+                    Err(e) if complete => app.operation_error(&e),
+                    Err(_) => {}
                 }
             }
         }

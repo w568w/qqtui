@@ -29,7 +29,7 @@ test('older quoted messages resolve by ID and by exact native sequence', async t
   const source={msgId:'90071992547409934',chatType:1,peerUid:'u_self',elements:[{replyElement:{replayMsgId:original.msgId,replayMsgSeq:original.msgSeq}}]};
   let sequences=0;
   b.msg.getMsgsByMsgId=async(_peer,ids)=>({result:0,msgList:ids[0]===source.msgId?[source]:ids[0]===original.msgId?[original]:[]});
-  b.msg.getMsgsBySeqList=async(_peer,seqs)=>{sequences++;assert.deepEqual(seqs,[original.msgSeq]);return{result:0,msgList:[original]};};
+  b.msg.getSingleMsg=async(_peer,seq)=>{sequences++;assert.equal(seq,original.msgSeq);return{result:0,msgList:[original]};};
   const byID=await b.call('messages.quote',{account:'123',peer,id:source.msgId},{});
   assert.equal(byID.messages[0].text,'older original');assert.equal(sequences,0);
   source.elements[0].replyElement.replayMsgId='0';
@@ -38,12 +38,6 @@ test('older quoted messages resolve by ID and by exact native sequence', async t
   assert.equal(bySeq.messages[0].id,original.msgId);assert.equal(sequences,1);
   assert.deepEqual((await b.call('messages.quote',{account:'123',peer,id:original.msgId},{})).messages,[]);
   await assert.rejects(b.call('messages.quote',{account:'other',peer,id:source.msgId},{}),/Account changed/);
-  let rangeCalls=0;
-  b.msg.getMsgsBySeqRange=async(_peer,start,end)=>{rangeCalls++;assert.equal(start,original.msgSeq);assert.equal(end,start);return{result:0,msgList:[original]};};
-  assert.equal((await b.call('messages.quote',{account:'123',peer,id:source.msgId},{})).messages[0].id,original.msgId);assert.equal(rangeCalls,1);
-  delete b.msg.getMsgsBySeqRange;delete b.msg.getMsgsBySeqList;
-  b.msg.getMsgsBySeqAndCount=async(_peer,seq,count,desc,reverse)=>{assert.equal(seq,original.msgSeq);assert.equal(count,1);assert.equal(desc,true);assert.equal(reverse,false);return{result:0,msgList:[original]};};
-  assert.equal((await b.call('messages.quote',{account:'123',peer,id:source.msgId},{})).messages[0].id,original.msgId);
 
 });
 test('QQ faces use local upstream assets and retain a text fallback', t => {
@@ -429,18 +423,15 @@ test('bundled QQ emoji metadata preserves animated sticker fields when shared re
   const resources=new QqResources({emojiDir:dir});const face=resources.faces.get('311');
   assert.equal(face.native.faceType,3);assert.equal(face.native.stickerId,1);assert.equal(face.native.packId,1);assert.equal(face.native.stickerType,1);
 });
-test('reaction capability and refresh support QQ sequence-list and sequence-count services',async t=>{
+test('reaction capability follows the native single-message lookup',async t=>{
   const {b}=fixture(t);const peer={chat_type:2,uid:'group'};
   const raw={msgId:'100',msgSeq:'12',chatType:2,peerUid:'group',elements:[{textElement:{content:'original'}}]};
   b.msg.setMsgEmojiLikes=async()=>({result:0});b.msg.getMsgEmojiLikesList=async()=>({result:0});
-  b.msg.getMsgsBySeqList=async(p,seqs)=>{assert.equal(p.peerUid,'group');assert.deepEqual(seqs,['12']);return{result:0,msgList:[raw,{...raw,msgSeq:'13'}]};};
-  assert(b.status().capabilities.includes('reactions'));
-  assert.equal((await b.call('reactions.refresh',{account:'123',peer,seq:'12'},{})).messages.length,1);
-  delete b.msg.getMsgsBySeqList;
-  b.msg.getMsgsBySeqAndCount=async(p,seq,count,desc,reverse)=>{assert.equal(count,1);assert.equal(desc,true);assert.equal(reverse,false);return{result:0,msgList:[raw]};};
+  assert(!b.status().capabilities.includes('reactions'));
+  b.msg.getSingleMsg=async(p,seq)=>{assert.equal(p.peerUid,'group');assert.equal(seq,'12');return{result:0,msgList:[raw,{...raw,msgSeq:'13'}]};};
   assert(b.status().capabilities.includes('reactions'));
   assert.equal((await b.call('reactions.refresh',{account:'123',peer,seq:'12'},{})).messages[0].text,'original');
-  b.msg.getMsgsBySeqAndCount=async()=>{b.account='changed';return{result:0,msgList:[raw]};};
+  b.msg.getSingleMsg=async()=>{b.account='changed';return{result:0,msgList:[raw]};};
   await assert.rejects(b.call('reactions.refresh',{account:'123',peer,seq:'12'},{}),/session changed/);
 });
 
@@ -496,7 +487,7 @@ test('gray tips use structured notice semantics and reaction targets resolve by 
   const poke=message({msgId:'10',elements:[{grayTipElement:{subElementType:17,jsonGrayTipElement:{jsonStr:JSON.stringify({align:'center',items:[{txt:'甲'},{txt:' 拍了拍 '},{txt:'乙'}]})}}}]},'123');
   assert.equal(poke.system_notice,true);assert.equal(poke.text,'甲 拍了拍 乙');
   assert.equal(message({msgId:'11',elements:[{textElement:{content:'撤回了消息'}}]},'123').system_notice,false);
-  b.msg.getMsgsBySeqList=async(_peer,seqs)=>({result:0,msgList:[{msgId:'99',msgSeq:seqs[0],chatType:1,peerUid:'u_self',elements:[{textElement:{content:'original'}}]}]});
+  b.msg.getSingleMsg=async(_peer,seq)=>({result:0,msgList:[{msgId:'99',msgSeq:seq,chatType:1,peerUid:'u_self',elements:[{textElement:{content:'original'}}]}]});
   const found=await b.call('messages.sequence',{account:'123',peer,seq:'987654'},{});
   assert.equal(found.messages[0].id,'99');assert.equal(found.messages[0].text,'original');
 });
@@ -625,6 +616,15 @@ test('upload preparation creates only the native target directory and reports a 
   const failed=await b.call('messages.send',{...request,request_id:'missing-source'},{});assert.equal(failed.state,'failed');assert.match(failed.error,/重新选择附件/);assert.equal(count(),1);
 });
 
+test('reaction sequence lookup excludes gray tips sharing the target sequence and other peers', async t => {
+  const {b}=fixture(t);const group={chat_type:2,uid:'100'};
+  const original={msgId:'2',msgSeq:'42',chatType:2,peerUid:'100',elements:[{textElement:{content:'original'}}]};
+  const tip={...original,msgId:'1',elements:[{grayTipElement:{xmlElement:{templId:'10382',content:'<gtip><url msgseq="42"/></gtip>'}}}]};
+  b.msg.getSingleMsg=async(p,seq)=>{assert.equal(seq,'42');return {result:0,msgList:[tip,{...original,msgId:'3',peerUid:'other'},original]};};
+  const result=await b.call('reactions.refresh',{account:'123',peer:group,seq:'42'},{});
+  assert.deepEqual(result.messages.map(m=>m.id),['2']);
+});
+
 test('native group names resolve reaction actors, poke participants and recall operators with shared bounded queries', async t => {
   const {b}=fixture(t);let queries=0;
   b.session.getGroupService=()=>({getAllMemberList:async(_id,force)=>{assert.equal(force,true);queries++;return {result:{infos:new Map([
@@ -642,4 +642,21 @@ test('native group names resolve reaction actors, poke participants and recall o
   await b.normalizeMessages(raws);assert.equal(queries,1);
   b.presentation.member('100',new Map());await b.normalizeMessages(raws);assert.equal(queries,2);
   b.presentation.close();assert.equal(b.presentation.nameLists.size,0);
+});
+
+test('reaction refresh cannot cross an account change during the native fetch', async t => {
+  const {b}=fixture(t);let lookedUp=false;
+  b.msg.getSingleMsg=async()=>{b.account='456';return {result:0};};
+  b.msg.getMsgsBySeqList=async()=>{lookedUp=true;return {result:0,msgList:[]};};
+  await assert.rejects(b.call('reactions.refresh',{account:'123',peer:{chat_type:2,uid:'100'},seq:'42'},{}),/session changed/);
+  assert.equal(lookedUp,false);
+});
+
+test('missing original messages never resolve to a gray tip or a neighboring sequence',async t=>{
+  const {b}=fixture(t);const peer={chat_type:2,uid:'100'};
+  const original={msgId:'2',msgSeq:'42',chatType:2,peerUid:'100',elements:[{textElement:{content:'body'}}]};
+  for (const rows of [[],[{...original,msgSeq:'41'},{...original,msgId:'1',elements:[{grayTipElement:{xmlElement:{templId:'10382'}}}]}]]) {
+    b.msg.getSingleMsg=async()=>({result:0,msgList:rows});
+    assert.deepEqual((await b.call('messages.sequence',{account:'123',peer,seq:'42'},{})).messages,[]);
+  }
 });

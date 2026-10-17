@@ -92,7 +92,7 @@ impl Store {
             use rusqlite::OptionalExtension;
             for (column, value) in [("id", id), ("json_extract(data,'$.seq')", seq)] {
                 if let Some(value) = value.filter(|v| !v.is_empty() && v != "0") {
-                    let data: Option<String> = db.query_row(&format!("SELECT data FROM messages WHERE account=?1 AND peer=?2 AND {column}=?3 LIMIT 1"),params![account,peer.key(),value],|r|r.get(0)).optional()?;
+                    let data: Option<String> = db.query_row(&format!("SELECT data FROM messages WHERE account=?1 AND peer=?2 AND {column}=?3 AND (COALESCE(json_extract(data,'$.system_notice'),0)=0 OR COALESCE(json_extract(data,'$.recalled'),0)=1) AND json_extract(data,'$.reaction_notice') IS NULL LIMIT 1"),params![account,peer.key(),value],|r|r.get(0)).optional()?;
                     if let Some(data) = data { return Ok(Some(serde_json::from_str(&data)?)); }
                 }
             }
@@ -206,7 +206,7 @@ impl Store {
             let tx = db.transaction()?;
             let messages = {
                 let mut s = tx
-                    .prepare("SELECT data FROM messages WHERE account=?1 AND peer=?2 AND json_extract(data,'$.seq')=?3")?;
+                    .prepare("SELECT data FROM messages WHERE account=?1 AND peer=?2 AND json_extract(data,'$.seq')=?3 AND (COALESCE(json_extract(data,'$.system_notice'),0)=0 OR COALESCE(json_extract(data,'$.recalled'),0)=1) AND json_extract(data,'$.reaction_notice') IS NULL")?;
                 let rows = s.query_map(params![account, peer.key(), seq], |r| {
                     r.get::<_, String>(0)
                 })?;
@@ -346,6 +346,43 @@ mod tests {
             chat_type: 1,
             uid: "self".into(),
         }
+    }
+    #[tokio::test]
+    async fn sequence_quotes_skip_notices_even_when_the_native_sequence_is_shared() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Store::open(&temp.path().join("db")).await.unwrap();
+        let original = Message {
+            account: "a".into(),
+            peer: peer(),
+            id: "2".into(),
+            seq: "42".into(),
+            ..Default::default()
+        };
+        let notice = Message {
+            id: "1".into(),
+            reaction_notice: Some("<gtip><url msgseq=\"42\"/></gtip>".into()),
+            system_notice: true,
+            ..original.clone()
+        };
+        store.save_messages(vec![notice, original]).await.unwrap();
+        assert_eq!(
+            store
+                .quoted_message("a".into(), peer(), None, Some("42".into()))
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            "2"
+        );
+        let recalled = store.recall("a".into(), peer(), "42".into()).await.unwrap();
+        assert_eq!(recalled.len(), 1);
+        assert_eq!(recalled[0].id, "2");
+        let messages = store.messages("a".into(), peer(), None).await.unwrap();
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.id == "1" && m.reaction_notice.is_some())
+        );
     }
     #[tokio::test]
     async fn caches_are_scoped_by_account_and_peer_and_search_handles_short_chinese() {

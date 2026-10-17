@@ -458,9 +458,7 @@ class NativeBridge {
         ["setMsgEmojiLikes", "getMsgEmojiLikesList"].every(
           (method) => typeof this.msg?.[method] === "function",
         ) &&
-        ["getMsgsBySeqRange", "getMsgsBySeqAndCount", "getMsgsBySeqList"].some(
-          (method) => typeof this.msg?.[method] === "function",
-        )
+        typeof this.msg?.getSingleMsg === "function"
       )
         capabilities.push("reactions");
     }
@@ -511,20 +509,15 @@ class NativeBridge {
   async messagesBySequence(peer, seq) {
     const context = this.sessionContext();
     const msg = context.msg;
-    let result;
-    if (typeof msg.getMsgsBySeqRange === "function")
-      result = await msg.getMsgsBySeqRange(peer, seq, seq);
-    else if (typeof msg.getMsgsBySeqAndCount === "function")
-      result = await msg.getMsgsBySeqAndCount(peer, seq, 1, true, false);
-    else if (typeof msg.getMsgsBySeqList === "function")
-      result = await msg.getMsgsBySeqList(peer, [seq]);
-    else throw new Error("QQ sequence lookup unavailable");
+    if (typeof msg.getSingleMsg !== "function")
+      throw new Error("QQ single-message lookup unavailable");
+    const result = checked(await msg.getSingleMsg(peer, seq));
     context.check();
-    return (checked(result).msgList || []).filter(
-      (raw) => String(raw.msgSeq) === seq,
-    );
+    if (!Array.isArray(result.msgList))
+      throw new Error("QQ single-message lookup returned no message list");
+    return result.msgList.filter(raw => samePeer(raw, peer) && String(raw.msgSeq) === seq &&
+      !(raw.elements || []).some(e => e.grayTipElement && !e.grayTipElement.revokeElement && e.grayTipElement.subElementType !== 1));
   }
-
   subscribe() {
     if (this.active || this.phase !== "ready") return;
     const add = (service, method, remove, handlers) => {

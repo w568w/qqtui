@@ -251,6 +251,9 @@ impl Message {
     }
 
     pub fn quote_key(&self) -> Option<String> {
+        if let Some(notice) = self.reaction_reference() {
+            return Some(format!("seq:{}", notice.seq));
+        }
         self.reply_to
             .as_ref()
             .filter(|id| !id.is_empty() && id.as_str() != "0")
@@ -462,6 +465,11 @@ mod tests {
             .notice_names
             .insert("u_actor".into(), "群名片".into());
         assert_eq!(message.reaction_reference().unwrap().actor, "群名片");
+        message.reply_to = Some("unrelated".into());
+        assert_eq!(
+            message.quote_key().as_deref(),
+            Some("seq:18446744073709551615")
+        );
         assert!(
             matches!(message.render_parts().as_slice(),[MessagePart::Text {text}] if text.contains("表情回应") && !text.contains("系统消息"))
         );
