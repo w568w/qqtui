@@ -499,6 +499,8 @@ pub struct SpeechPermission {
     pub scope: String,
     pub reason: String,
     pub until: Option<String>,
+    #[serde(default)]
+    pub can_moderate: bool,
 }
 #[derive(Clone, Debug, serde::Deserialize)]
 pub struct Avatar {

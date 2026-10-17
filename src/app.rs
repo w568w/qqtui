@@ -2804,9 +2804,13 @@ pub fn action_labels(app: &App) -> Vec<(String, bool)> {
         label(
             "撤回",
             chat_reason.or_else(|| {
-                message
-                    .is_some_and(|m| !m.is_self)
-                    .then_some("仅自己的消息")
+                (message.is_some_and(|m| !m.is_self)
+                    && (app.selected_peer.as_ref().is_none_or(|p| p.chat_type != 2)
+                        || app
+                            .chat()
+                            .and_then(|c| c.permission.as_ref())
+                            .is_none_or(|p| !p.can_moderate)))
+                .then_some("需要群管理权限")
             }),
         ),
         label(
@@ -4731,6 +4735,7 @@ fn apply_work(app: &mut App, controller: &mut Controller, store: &Store, work: W
                     scope: "unknown".into(),
                     reason: format!("无法确认群权限：{e}，切换会话可重试"),
                     until: None,
+                    can_moderate: false,
                 }));
             }
         }
@@ -5870,6 +5875,41 @@ mod tests {
                 .collect::<String>()
                 .contains("未读群12")
         );
+    }
+    #[test]
+    fn moderator_can_recall_others_but_members_and_private_chats_cannot() {
+        for (chat_type, is_self, can_moderate, allowed) in [
+            (2, false, true, true),
+            (2, false, false, false),
+            (2, true, false, true),
+            (1, false, true, false),
+        ] {
+            let mut app = App::new(Config::default());
+            app.ready = true;
+            let group = Peer {
+                chat_type,
+                uid: "group".into(),
+            };
+            app.selected_peer = Some(group.clone());
+            let message = Message {
+                peer: group.clone(),
+                is_self,
+                ..msg("1", "1")
+            };
+            app.chats.insert(
+                group,
+                Chat {
+                    selected: Some("1".into()),
+                    messages: vec![message],
+                    permission: Some(SpeechPermission {
+                        can_moderate,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(action_labels(&app)[2].1, allowed);
+        }
     }
     fn peer(uid: &str) -> Peer {
         Peer {
@@ -9308,6 +9348,7 @@ mod release_regressions {
                     scope: "all".into(),
                     reason: "群已开启全员禁言".into(),
                     until: None,
+                    can_moderate: false,
                 }),
                 ..Default::default()
             },

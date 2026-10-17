@@ -19,7 +19,7 @@
 | conversations.open | account、epoch、peer | 调用 QQ 原生添加最近会话 |
 | contacts.list | account | items：Conversation 数组 |
 | avatars.resolve | account、发送者原生 uid | 本机 path、资源 version |
-| conversations.permissions | account、peer | state、scope、reason、可空 until |
+| conversations.permissions | account、peer | state、scope、reason、可空 until、can_moderate |
 | profiles.info | account、uid | uid、uin、nick、remark、signature |
 | members.list | account、群 peer | items：uid、uin、name 数组 |
 | messages.history | account、peer、before?／after?／around?、limit | messages、has_before、has_after、anchor_found；limit 为 1–100 |
@@ -92,6 +92,8 @@ QQ 邮箱提醒的 arkElement 卡片解析 view=mail 下的发件人、主题、
 宿主状态带 protocol_version=2。前端在就绪前核对版本，版本不匹配时提示更新并重启宿主。联系人与成员使用项目 DTO。
 
 头像 uid 使用消息的 sender_uid。为可见发送者调度查询，按账号、连接、epoch 和请求 token 接受结果；暂不可用时使用固定占位。version 来自原生本地文件状态，用于识别更新。
+
+SpeechPermission.can_moderate 表示 QQ 原生群主／管理员身份，可申请撤回其他人的消息，最终权限由原生撤回接口校验。
 
 SpeechPermission.state 为 allowed／blocked／unknown；scope 为 none／all／self／unknown，reason 表达可确认的原生限制，until 是可空的原生结束时间字符串。全员禁言结合本人成员角色判断豁免，个人禁言按实际到期时间判断。查询结果不能代替提交前的原生权限检查。
 

@@ -1663,7 +1663,7 @@ fn draw_modal(
             *index,
         ),
         Modal::ConfirmRecall(m) => (
-            "撤回自己的消息 · Enter 确认 · Esc 取消".into(),
+            "撤回消息 · Enter 确认 · Esc 取消".into(),
             String::new(),
             vec![(m.text.clone(), true)],
             0,

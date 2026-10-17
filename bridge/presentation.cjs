@@ -131,7 +131,7 @@ class Presentation {
         }, finish);
       });
       context.check();
-      return permission(group, detail);
+      return { ...permission(group, detail), can_moderate: [3, 4].includes(Number(group?.memberRole)) };
     })();
     this.pending.set(id, work);
     try {

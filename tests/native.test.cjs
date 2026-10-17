@@ -644,6 +644,15 @@ test('native group names resolve reaction actors, poke participants and recall o
   b.presentation.close();assert.equal(b.presentation.nameLists.size,0);
 });
 
+test('group recall delegates other senders to QQ and preserves native rejection', async t => {
+  const {b}=fixture(t);const group={chat_type:2,uid:'100'};let calls=0;
+  b.msg.recallMsg=async(p,ids)=>{assert.equal(p.peerUid,'100');assert.deepEqual(ids,['42']);calls++;return {result:0};};
+  await b.call('messages.recall',{account:'123',epoch:b.epoch,peer:group,id:'42'},{});
+  assert.equal(calls,1);
+  b.msg.recallMsg=async()=>({result:42,errMsg:'native permission denied'});
+  await assert.rejects(b.call('messages.recall',{account:'123',epoch:b.epoch,peer:group,id:'42'},{}),/native permission denied/);
+});
+
 test('reaction refresh cannot cross an account change during the native fetch', async t => {
   const {b}=fixture(t);let lookedUp=false;
   b.msg.getSingleMsg=async()=>{b.account='456';return {result:0};};
