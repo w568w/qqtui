@@ -9,7 +9,10 @@ const { NativeBridge, nativePeer, message } = require('../bridge/native.cjs');
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qqtui-native-test-'));
 
-  const b = new NativeBridge(path.join(dir, 'bridge.sock'));
+  const endpoint = process.platform === 'win32'
+    ? "\\\\.\\pipe\\" + path.basename(dir)
+    : path.join(dir, 'bridge.sock');
+  const b = new NativeBridge(endpoint, {stateDir:dir});
   const journals=[b.journalStore];
   t.after(async()=>{for(const journal of journals)await journal.close();fs.rmSync(dir,{recursive:true,force:true});});
   b.account = '123'; b.phase = 'ready';
