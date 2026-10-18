@@ -494,6 +494,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, media: &mut Media) -> DrawWork {
     let inner = block.inner(chat_area);
     frame.render_widget(block, chat_area);
     let bottom_binding = app.binding("bottom");
+    let open_binding = app.binding("open");
     let mode = app.mode;
     let modal_open = app.modal.is_open() && !details_sidebar;
     let pending: Vec<_> = app
@@ -890,7 +891,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, media: &mut Media) -> DrawWork {
                             Paragraph::new(if attachment.kind == "emoji" {
                                 format!("[{}]", safe_text(&attachment.name))
                             } else {
-                                format!("无法预览：{error}")
+                                format!("无法预览 · {open_binding} 用外部浏览器打开\n{error}")
                             })
                             .style(Style::default().fg(MUTED)),
                             rect,
@@ -1131,7 +1132,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, media: &mut Media) -> DrawWork {
                     upscale: true,
                     animate: true,
                 };
-                image_preview(frame, media, &mut work, key, inner);
+                image_preview(frame, media, &mut work, key, inner, &app.binding("open"));
             }
         }
     } else if app.modal.is_open() {
@@ -1153,6 +1154,7 @@ fn image_preview(
     work: &mut DrawWork,
     key: ImageKey,
     area: Rect,
+    open_binding: &str,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -1170,7 +1172,13 @@ fn image_preview(
             area,
         );
     } else if let Some(error) = media.failure(&key) {
-        frame.render_widget(Paragraph::new(format!("无法预览：{error}")), area);
+        frame.render_widget(
+            Paragraph::new(format!(
+                "无法预览 · {open_binding} 用外部浏览器打开\n{error}"
+            ))
+            .wrap(Wrap { trim: false }),
+            area,
+        );
     } else {
         frame.render_widget(Paragraph::new("正在加载图片…"), area);
     }
@@ -1190,6 +1198,7 @@ fn draw_modal(
     sidebar: Option<Rect>,
     hits: &mut HitRegions,
 ) {
+    let open_binding = app.binding("open");
     let area = frame.area();
     let width = (area.width.saturating_mul(4) / 5).clamp(1, 90);
     let height = (area.height.saturating_mul(4) / 5).clamp(1, 30);
@@ -1281,6 +1290,7 @@ fn draw_modal(
                         animate: false,
                     },
                     image_area,
+                    &app.binding("open"),
                 );
             } else {
                 let error = app.sticker_errors.get(&(*token, sticker.id.clone()));
@@ -1481,6 +1491,20 @@ fn draw_modal(
                         )),
                     ),
                     target,
+                );
+            } else if let Some(error) = media.failure(&key) {
+                frame.render_widget(
+                    Paragraph::new(format!(
+                        "无法预览 · {open_binding} 用外部浏览器打开\n{error}"
+                    ))
+                    .wrap(Wrap { trim: false })
+                    .style(Style::default().fg(MUTED)),
+                    Rect::new(
+                        target.x,
+                        inner.y + row.saturating_sub(*scroll) as u16,
+                        target.width,
+                        height.min(target.height as usize) as u16,
+                    ),
                 );
             }
         }
