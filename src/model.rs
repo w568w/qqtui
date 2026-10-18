@@ -107,6 +107,8 @@ pub struct Message {
     #[serde(default)]
     pub parts: Vec<MessagePart>,
     #[serde(default)]
+    pub card_parts: Vec<usize>,
+    #[serde(default)]
     pub forward: Option<String>,
     #[serde(default)]
     pub forward_path: Vec<String>,
@@ -139,7 +141,8 @@ impl Message {
         self.revision = next_message_revision();
     }
     pub fn memory_bytes(&self) -> usize {
-        self.text.len()
+        self.card_parts.len() * std::mem::size_of::<usize>()
+            + self.text.len()
             + self
                 .parts
                 .iter()
@@ -283,6 +286,7 @@ impl Message {
         self.attachments.clear();
         self.parts.clear();
         self.forward = None;
+        self.card_parts.clear();
         self.reactions.clear();
         self.reaction_notice = None;
         self.reply_to = None;

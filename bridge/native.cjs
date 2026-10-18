@@ -106,6 +106,34 @@ function mailText(element) {
     return "[QQ 邮箱提醒]";
   }
 }
+function arkData(element) {
+  if (typeof element?.bytesData !== "string" || element.bytesData.length > 65536) return null;
+  try {
+    const data = JSON.parse(element.bytesData);
+    return data && typeof data === "object" && !Array.isArray(data) ? data : null;
+  } catch (_) { return null; }
+}
+function cardText(data) {
+  if (!data) return "[卡片消息]";
+  const lines = [];
+  const add = value => {
+    if (typeof value !== "string") return;
+    const text = cleanText(value).trim();
+    if (text && !lines.includes(text)) lines.push(text);
+  };
+  for (const detail of Object.values(data.meta || {}).slice(0, 8)) {
+    if (!detail || typeof detail !== "object") continue;
+    for (const key of ["title", "desc", "summary", "content", "tag", "name", "address"]) add(detail[key]);
+    for (const key of ["jumpUrl", "qqdocurl", "url"]) {
+      try {
+        const url = new URL(detail[key]);
+        if (["https:", "http:"].includes(url.protocol) && !url.username && !url.password) add(url.href);
+      } catch (_) {}
+    }
+  }
+  if (!lines.length) add(data.prompt || data.desc);
+  return lines.join("\n") || "[卡片消息]";
+}
 function message(raw, account, resources = new QqResources(), names = {}) {
   const recalled = (raw.elements ?? []).some(
     (e) =>
@@ -113,6 +141,7 @@ function message(raw, account, resources = new QqResources(), names = {}) {
   );
   const attachments = [];
   const parts = [];
+  const card_parts = [];
   let forward = null;
   let reaction_notice = null;
   let text = "";
@@ -185,6 +214,17 @@ function message(raw, account, resources = new QqResources(), names = {}) {
       const content = mailText(e.arkElement);
       text += content;
       parts.push({ type: "text", text: content });
+    } else if (e.arkElement) {
+      const data = arkData(e.arkElement);
+      if (data?.app === "com.tencent.multimsg") {
+        forward = e.arkElement.bytesData;
+        text += "[合并转发聊天记录]";
+      } else {
+        const content = cardText(data);
+        text += content;
+        card_parts.push(parts.length);
+        parts.push({ type: "text", text: content });
+      }
     } else if (e.multiForwardMsgElement) {
       forward = cleanText(e.multiForwardMsgElement.xmlContent);
       text += "[合并转发聊天记录]";
@@ -251,6 +291,7 @@ function message(raw, account, resources = new QqResources(), names = {}) {
     text: recalled ? (raw.elements || []).filter(e => e.grayTipElement &&
       (e.grayTipElement.revokeElement || e.grayTipElement.subElementType === 1))
       .map(e => grayTipText(e.grayTipElement, names, raw)).join("") : text,
+    card_parts: recalled ? [] : card_parts,
     parts: recalled ? [] : parts,
     forward: recalled ? null : forward,
     attachments: recalled ? [] : attachments,
@@ -495,7 +536,7 @@ class NativeBridge {
     context.check();
     for (const id of ids) {
       const source = raws.find((m) => String(m.msgId) === id);
-      if (!source?.elements?.some((e) => e.multiForwardMsgElement))
+      if (!source?.elements?.some((e) => e.multiForwardMsgElement || arkData(e.arkElement)?.app === "com.tencent.multimsg"))
         throw new Error("Forward message unavailable");
       raws =
         checked(await context.msg.getMultiMsg(peer, ids[0], id)).msgList || [];

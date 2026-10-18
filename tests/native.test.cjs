@@ -736,3 +736,23 @@ test('closing the viewer RPC connection releases its desktop lease', async t => 
   await released;
   assert.equal(leases.size,0);
 });
+
+test('type-10 cards render readable fields and links without exposing JSON or executing app URLs', () => {
+  const raw={msgId:'10',chatType:2,peerUid:'group',elements:[{elementType:1,textElement:{content:'前文'}},{elementType:10,arkElement:{bytesData:JSON.stringify({app:'com.tencent.miniapp_01',meta:{detail_1:{title:'视频分享',desc:'标题\u001b[31m',qqdocurl:'https://example.com/video',url:'javascript:alert(1)',preview:'https://example.com/private-preview',appid:'private-app-id'}}})}}]};
+  const normalized=message(raw,'123');
+  assert.deepEqual(normalized.card_parts,[1]);
+  assert.equal(normalized.parts[1].type,'text');
+  assert(normalized.text.includes('视频分享\n标题[31m\nhttps://example.com/video'));
+  assert(!normalized.text.includes('javascript:') && !normalized.text.includes('private-preview') && !normalized.text.includes('private-app-id'));
+  raw.elements=[{elementType:10,arkElement:{bytesData:'invalid'}}];
+  assert.equal(message(raw,'123').text,'[卡片消息]');
+});
+test('JSON merged-forward cards use the native forward reader', async t => {
+  const {b}=fixture(t);
+  const card={app:'com.tencent.multimsg',meta:{detail:{news:[{text:'甲: 内容'}],summary:'查看1条消息'}}};
+  const raw={msgId:'10',chatType:1,peerUid:'u_self',elements:[{elementType:10,arkElement:{bytesData:JSON.stringify(card)}}]};
+  b.msg.getMsgsByMsgId=async()=>({result:0,msgList:[raw]});
+  b.msg.getMultiMsg=async(_peer,root,id)=>{assert.equal(root,'10');assert.equal(id,'10');return {result:0,msgList:[{msgId:'11',chatType:1,peerUid:'u_self',elements:[{textElement:{content:'原消息'}}]}]};};
+  assert.equal(message(raw,'123').forward,JSON.stringify(card));
+  assert.equal((await b.call('messages.forward',{account:'123',peer,path:['10']},{})).messages[0].text,'原消息');
+});

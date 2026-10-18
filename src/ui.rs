@@ -163,8 +163,21 @@ fn compute_body_layout(message: &Message, width: usize, media: &Media) -> BodyLa
         height: 1,
         ..Default::default()
     };
-    for part in message.render_parts() {
+    for (index, part) in message.render_parts().into_iter().enumerate() {
         match part {
+            MessagePart::Text { text } if message.card_parts.contains(&index) => {
+                if layout.column > 0 {
+                    layout.newline();
+                }
+                layout.text("┌ 卡片", width);
+                layout.newline();
+                for line in wrap(&text, width.saturating_sub(2).max(1)) {
+                    layout.text(&format!("│ {line}"), width);
+                    layout.newline();
+                }
+                layout.text("└", width);
+                layout.newline();
+            }
             MessagePart::Text { text } => {
                 layout.text(&safe_text(&text).replace('\t', "    "), width)
             }
@@ -249,6 +262,21 @@ pub fn forward_summary(xml: &str) -> Vec<String> {
             if !text.trim().is_empty() {
                 lines.push(format!("│ {}", text.trim()));
             }
+        }
+    }
+    if xml.len() <= 65536
+        && let Ok(data) = serde_json::from_str::<serde_json::Value>(xml)
+        && let Some(detail) = data.get("meta").and_then(|m| m.get("detail"))
+    {
+        if let Some(news) = detail.get("news").and_then(|v| v.as_array()) {
+            for entry in news.iter().take(4) {
+                if let Some(text) = entry.get("text").and_then(|v| v.as_str()) {
+                    lines.push(format!("│ {}", safe_text(text)));
+                }
+            }
+        }
+        if let Some(summary) = detail.get("summary").and_then(|v| v.as_str()) {
+            lines.push(format!("│ {}", safe_text(summary)));
         }
     }
     lines.push("└ Enter 查看聊天记录".into());
@@ -1855,5 +1883,26 @@ mod rich_message_tests {
             &mut RenderCache::default(),
         );
         assert!(layout.lines.iter().any(|line| line.contains("合并转发")));
+    }
+    #[test]
+    fn ark_cards_wrap_and_json_forward_cards_show_their_summary() {
+        let mut message = Message {
+            text: "标题\nhttps://example.com".into(),
+            parts: vec![MessagePart::Text {
+                text: "标题\nhttps://example.com".into(),
+            }],
+            card_parts: vec![0],
+            ..Default::default()
+        };
+        let media = Media::new(ratatui_image::picker::Picker::halfblocks());
+        let layout = body_layout(&message, 20, &media, &mut RenderCache::default());
+        assert!(layout.lines[0].contains("卡片"));
+        assert!(layout.lines.iter().any(|l| l.contains("│ 标题")));
+        assert!(layout.lines.iter().all(|l| l.width() <= 20));
+        message.retract();
+        assert!(message.card_parts.is_empty());
+        let json = r#"{"app":"com.tencent.multimsg","meta":{"detail":{"news":[{"text":"甲: 原消息"}],"summary":"查看1条消息"}}}"#;
+        let summary = forward_summary(json).join("\n");
+        assert!(summary.contains("甲: 原消息") && summary.contains("查看1条消息"));
     }
 }
