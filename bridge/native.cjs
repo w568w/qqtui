@@ -492,6 +492,7 @@ class NativeBridge {
           ]
         : [];
     if (this.options.desktop) capabilities.push("desktop_viewer");
+    if (this.phase === "ready" && typeof this.msg?.getFirstUnreadMsgSeq === "function" && typeof this.msg?.getSingleMsg === "function") capabilities.push("unread_anchor");
     if (this.phase === "ready") {
       if (
         typeof this.msg?.fetchFavEmojiList === "function" ||
@@ -1554,6 +1555,23 @@ class NativeBridge {
       return {
         messages: await this.normalizeMessages(result.msgList || [], context),
       };
+    }
+    if (method === "conversations.unread") {
+      if (peer.chatType !== 2) return {id:null};
+      const result = checked(await this.msg.getFirstUnreadMsgSeq(peer));
+      context.check();
+      const seq = String(result.seq ?? "0");
+      if (seq === "0") return {id:null};
+      if (!isNativeId(seq)) throw new Error("Invalid native unread sequence");
+      let raws = checked(await this.msg.getSingleMsg(peer, seq)).msgList || [];
+      context.check();
+      if (!raws.some(raw => samePeer(raw,peer) && String(raw.msgSeq) === seq) && typeof this.msg.getMsgsBySeqAndCount === "function") {
+        raws = checked(await this.msg.getMsgsBySeqAndCount(peer,seq,1,false,false)).msgList || [];
+        context.check();
+      }
+      const target = raws.filter(raw => samePeer(raw,peer) && isNativeId(String(raw.msgId)) && isNativeId(String(raw.msgSeq)) && BigInt(raw.msgSeq) >= BigInt(seq))
+        .sort((a,b) => BigInt(a.msgSeq) < BigInt(b.msgSeq) ? -1 : BigInt(a.msgSeq) > BigInt(b.msgSeq) ? 1 : 0)[0];
+      return {id:target ? String(target.msgId) : null};
     }
     if (method === "messages.history") {
       const limit = p.limit ?? 40;

@@ -756,3 +756,19 @@ test('JSON merged-forward cards use the native forward reader', async t => {
   assert.equal(message(raw,'123').forward,JSON.stringify(card));
   assert.equal((await b.call('messages.forward',{account:'123',peer,path:['10']},{})).messages[0].text,'原消息');
 });
+test('native unread anchors use the full peer and preserve sequence and message ID namespaces', async t => {
+  const {b}=fixture(t),group={chat_type:2,uid:'group'},seq='90071992547409931',id='18446744073709551613';
+  b.msg.getFirstUnreadMsgSeq=async p=>{assert.deepEqual(p,nativePeer(group));return {result:0,seq};};
+  b.msg.getSingleMsg=async(p,value)=>{assert.equal(value,seq);return {result:0,msgList:[{chatType:2,peerUid:'group',msgSeq:seq,msgId:id}]};};
+  assert.deepEqual(await b.call('conversations.unread',{account:'123',peer:group},{}),{id});
+  b.msg.getSingleMsg=async()=>({result:0,msgList:[]});
+  b.msg.getMsgsBySeqAndCount=async(p,value,count,desc,reverse)=>{
+    assert.equal(value,seq);assert.equal(count,1);assert.equal(desc,false);assert.equal(reverse,false);
+    return {result:0,msgList:[{chatType:2,peerUid:'group',msgSeq:'90071992547409932',msgId:id}]};
+  };
+  assert.deepEqual(await b.call('conversations.unread',{account:'123',peer:group},{}),{id});
+  b.msg.getFirstUnreadMsgSeq=async()=>({result:0,seq:'0'});
+  assert.deepEqual(await b.call('conversations.unread',{account:'123',peer:group},{}),{id:null});
+  b.msg.getFirstUnreadMsgSeq=async()=>({result:5,errMsg:'unavailable'});
+  await assert.rejects(b.call('conversations.unread',{account:'123',peer:group},{}),/unavailable/);
+});

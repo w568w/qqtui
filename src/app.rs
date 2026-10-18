@@ -57,6 +57,17 @@ pub struct ReadState {
     pub pending: Option<uuid::Uuid>,
     pub retry_after: Option<Instant>,
 }
+#[derive(Default)]
+pub enum UnreadState {
+    #[default]
+    Uncaptured,
+    Loading {
+        token: uuid::Uuid,
+        jump: bool,
+    },
+    Ready(Option<String>),
+    Failed(String),
+}
 pub enum QuoteState {
     Loading(uuid::Uuid),
     Ready(Box<Message>),
@@ -94,6 +105,7 @@ pub struct Chat {
     pub draft_saving: Option<u64>,
     pub dirty_since: Option<Instant>,
     pub read: ReadState,
+    pub unread: UnreadState,
     pub new_messages: usize,
     pub rows: Vec<(String, usize, usize)>,
     pub view_height: usize,
@@ -131,6 +143,7 @@ impl Default for Chat {
             draft_saving: None,
             dirty_since: None,
             read: ReadState::default(),
+            unread: UnreadState::default(),
             new_messages: 0,
             rows: vec![],
             view_height: 1,
@@ -637,6 +650,7 @@ pub enum Action {
     History(HistoryPoint),
     JumpQuote(Message),
     JumpBack,
+    FirstUnread,
     Snapshot,
     MarkRead(Conversation),
     Folder,
@@ -664,6 +678,11 @@ pub struct RequestContext {
     native: Option<(uuid::Uuid, String)>,
 }
 pub enum Work {
+    UnreadTarget {
+        peer: Peer,
+        token: uuid::Uuid,
+        result: Result<Option<String>>,
+    },
     AccountSaved {
         token: uuid::Uuid,
         result: Result<HostStatus>,
@@ -1219,6 +1238,7 @@ impl App {
                 "preview" => "v",
                 "open" => "o",
                 "quote" => "gr",
+                "first_unread" => "gu",
                 "back" => "ctrl-t",
                 "stickers" => "ctrl-e",
                 "reactions" => "R",
@@ -1727,6 +1747,7 @@ impl App {
             "preview",
             "open",
             "quote",
+            "first_unread",
             "back",
             "reactions",
         ];
@@ -1778,6 +1799,7 @@ impl App {
                 }
                 self.notice = "没有符合条件的未读会话".into();
             }
+            "first_unread" => return vec![Action::FirstUnread],
             "reactions" => {
                 if let Some(message) = self.chat().and_then(|c| c.selected_message()) {
                     return vec![Action::Reactions(message.clone())];
@@ -3001,6 +3023,9 @@ impl Controller {
             chat.quotes.retain(|_, q| matches!(q, QuoteState::Ready(_)));
             chat.loaded = false;
             chat.read = ReadState::default();
+            if matches!(chat.unread, UnreadState::Loading { .. }) {
+                chat.unread = UnreadState::Uncaptured;
+            }
             if chat.loading {
                 chat.pending_history = Some(chat.history_position());
             }
@@ -3043,6 +3068,9 @@ impl Controller {
                 for chat in app.chats.values_mut() {
                     chat.quotes.retain(|_, q| matches!(q, QuoteState::Ready(_)));
                     chat.quote_jump = None;
+                    if matches!(chat.unread, UnreadState::Loading { .. }) {
+                        chat.unread = UnreadState::Uncaptured;
+                    }
                 }
                 if matches!(
                     app.modal,
@@ -3428,6 +3456,42 @@ impl Controller {
         }
         app.dirty = true;
     }
+    fn capture_unread(&self, app: &mut App, peer: &Peer) {
+        if !app.ready || !matches!(app.chats[peer].unread, UnreadState::Uncaptured) {
+            return;
+        }
+        if peer.chat_type != 2 || !app.capabilities.iter().any(|c| c == "unread_anchor") {
+            app.chats.get_mut(peer).unwrap().unread = UnreadState::Ready(None);
+            return;
+        }
+        let Some(backend) = self.backend.clone() else {
+            return;
+        };
+        let token = uuid::Uuid::new_v4();
+        app.chats.get_mut(peer).unwrap().unread = UnreadState::Loading { token, jump: false };
+        let tx = self.sender(app);
+        let account = app.account.clone();
+        let peer = peer.clone();
+        tokio::spawn(async move {
+            let result = async {
+                let value: Value = backend
+                    .call(
+                        "conversations.unread",
+                        json!({"account":account,"peer":peer}),
+                    )
+                    .await?;
+                Ok(value["id"].as_str().map(str::to_owned))
+            }
+            .await;
+            let _ = tx
+                .send(Work::UnreadTarget {
+                    peer,
+                    token,
+                    result,
+                })
+                .await;
+        });
+    }
     pub fn history(&self, app: &mut App, peer: Peer, position: HistoryPoint) {
         if !chat_supported(&peer) {
             return;
@@ -3786,7 +3850,36 @@ impl Controller {
                 }
             }
             Action::Quit => app.quit = true,
+            Action::FirstUnread => {
+                if app.ready && !app.capabilities.contains("unread_anchor") {
+                    app.notice = "当前宿主不支持未读定位，请重启对应宿主".into();
+                    return;
+                }
+                let Some(peer) = peer else {
+                    return;
+                };
+                app.chats.entry(peer.clone()).or_default();
+                self.capture_unread(app, &peer);
+                app.focus = Focus::Messages;
+                match &mut app.chats.get_mut(&peer).unwrap().unread {
+                    UnreadState::Loading { jump, .. } => {
+                        *jump = true;
+                        app.notice = "正在定位最早未读消息…".into();
+                    }
+                    UnreadState::Ready(Some(id)) => {
+                        let id = id.clone();
+                        self.jump(app, peer, id);
+                    }
+                    UnreadState::Ready(None) => app.notice = "当前会话没有可定位的未读起点".into(),
+                    UnreadState::Failed(error) => {
+                        let error = format!("读取未读起点：{error}");
+                        app.operation_error(error);
+                    }
+                    UnreadState::Uncaptured => app.notice = "QQ 原生服务未就绪".into(),
+                }
+            }
             Action::Select(peer) => {
+                let changed = app.selected_peer.as_ref() != Some(&peer);
                 if let Some(c) = app.chats.get_mut(&peer) {
                     c.last_used = Instant::now();
                 }
@@ -3823,7 +3916,10 @@ impl Controller {
                 }
                 app.sidebar_cursor = Some(peer.clone());
                 app.selected_peer = Some(peer.clone());
-                app.chats.entry(peer.clone()).or_default();
+                let chat = app.chats.entry(peer.clone()).or_default();
+                if changed {
+                    chat.unread = UnreadState::Uncaptured;
+                }
                 app.chats.get_mut(&peer).unwrap().read.confirmed.clear();
                 self.load_chat(app, &peer);
             }
@@ -4271,6 +4367,7 @@ impl Controller {
         });
     }
     pub fn load_chat(&self, app: &mut App, peer: &Peer) {
+        self.capture_unread(app, peer);
         self.permission(app, peer.clone());
         if !chat_supported(peer) {
             app.notice = "按 Enter 展开此会话分组".into();
@@ -4369,6 +4466,7 @@ impl Controller {
         if !chat.loaded
             || chat.loading
             || chat.has_later
+            || matches!(chat.unread, UnreadState::Loading { .. })
             || chat.read.pending.is_some()
             || chat
                 .read
@@ -4738,6 +4836,30 @@ fn apply_receipt(app: &mut App, store: &Store, tx: &mpsc::Sender<Work>, receipt:
 fn apply_work(app: &mut App, controller: &mut Controller, store: &Store, work: Work) {
     app.dirty = true;
     match work {
+        Work::UnreadTarget {
+            peer,
+            token,
+            result,
+        } => {
+            let Some(chat) = app.chats.get_mut(&peer) else {
+                return;
+            };
+            let jump = match chat.unread {
+                UnreadState::Loading {
+                    token: expected,
+                    jump,
+                } if expected == token => jump,
+                _ => return,
+            };
+            chat.unread = match result {
+                Ok(id) => UnreadState::Ready(id),
+                Err(error) => UnreadState::Failed(error.to_string()),
+            };
+            if jump && app.selected_peer.as_ref() == Some(&peer) {
+                controller.action(app, Action::FirstUnread);
+            }
+        }
+
         Work::AccountSaved { token, result } => {
             if app.pending_account != Some(token) {
                 return;
@@ -5347,6 +5469,9 @@ fn apply_work(app: &mut App, controller: &mut Controller, store: &Store, work: W
                             chat.exhausted = false;
                             chat.generation += 1;
                             chat.read = ReadState::default();
+                            if matches!(chat.unread, UnreadState::Loading { .. }) {
+                                chat.unread = UnreadState::Uncaptured;
+                            }
                             chat.permission = None;
                             chat.permission_pending = false;
                             chat.permission_at = None;
@@ -9054,6 +9179,195 @@ mod tests {
         assert_eq!(outbox[0].0.state, "failed");
         assert_eq!(outbox[0].1.text, "never submit");
         server.await.unwrap();
+    }
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn unread_origin_is_captured_before_read_and_survives_counter_clear_and_jump_back() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let temp = tempfile::tempdir().unwrap();
+        let store = Store::open(&temp.path().join("db")).await.unwrap();
+        let socket = temp.path().join("unread.sock");
+        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+        let target = Peer {
+            chat_type: 2,
+            uid: "group".into(),
+        };
+        let server_peer = target.clone();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (reader, mut writer) = stream.into_split();
+            let mut lines = BufReader::new(reader).lines();
+            for stage in 0..3 {
+                let request: Value =
+                    serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                let result = if stage == 0 {
+                    assert_eq!(request["method"], "conversations.unread");
+                    json!({"id":"5"})
+                } else {
+                    assert_eq!(request["method"], "messages.history");
+                    if stage == 1 {
+                        assert_eq!(request["params"]["around"], "5");
+                    }
+                    let mut message = msg(if stage == 1 { "5" } else { "105" }, "1");
+                    message.peer = server_peer.clone();
+                    json!({"messages":[message],"has_before":true,"has_after":stage==1,"anchor_found":true})
+                };
+                writer
+                    .write_all(
+                        format!(
+                            "{}\n",
+                            json!({"jsonrpc":"2.0","id":request["id"],"result":result})
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+        let (events, _) = mpsc::channel(8);
+        let backend = Backend::connect(&socket, events).await.unwrap();
+        let (tx, mut work) = mpsc::channel(16);
+        let mut controller = Controller {
+            clipboard: Default::default(),
+            backend: Some(backend),
+            store: store.clone(),
+            paths: Paths::discover().unwrap(),
+            tx,
+            connecting: false,
+            status_pending: false,
+            status_again: false,
+        };
+        let mut app = App::new(Config::default());
+        app.account = "a".into();
+        app.epoch = "host".into();
+        app.ready = true;
+        app.connected = true;
+        app.terminal_focused = true;
+        app.capabilities.insert("unread_anchor".into());
+        app.selected_peer = Some(target.clone());
+        let mut last = msg("105", "1");
+        last.peer = target.clone();
+        let mut chat = Chat {
+            loaded: true,
+            ..Default::default()
+        };
+        let mut earlier = msg("1", "1");
+        earlier.peer = target.clone();
+        let mut first_unread = msg("5", "1");
+        first_unread.peer = target.clone();
+        chat.merge(vec![earlier, first_unread, last]);
+        chat.selected = Some("105".into());
+        app.chats.insert(target.clone(), chat);
+        controller.capture_unread(&mut app, &target);
+        controller.read_if_visible(&mut app, true);
+        assert!(app.chat().unwrap().read.pending.is_none());
+        let update = tokio::time::timeout(Duration::from_secs(2), work.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        apply_work(&mut app, &mut controller, &store, update);
+        assert!(matches!(app.chat().unwrap().unread,UnreadState::Ready(Some(ref id)) if id=="5"));
+        app.conversations = vec![Conversation {
+            peer: target,
+            unread: "0".into(),
+            ..Default::default()
+        }];
+        assert!(
+            app.key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE))
+                .is_empty()
+        );
+        for action in app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE)) {
+            controller.action(&mut app, action);
+        }
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        let mut media = crate::media::Media::new(ratatui_image::picker::Picker::halfblocks());
+        terminal
+            .draw(|frame| {
+                let work = crate::ui::draw(frame, &mut app, &mut media);
+                assert!(!work.readable);
+            })
+            .unwrap();
+        assert!(!app.chat().unwrap().viewport.follow);
+        assert_eq!(app.chat().unwrap().viewport.anchor.as_deref(), Some("5"));
+        assert_eq!(app.chat().unwrap().selected.as_deref(), Some("5"));
+        let update = tokio::time::timeout(Duration::from_secs(2), work.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        apply_work(&mut app, &mut controller, &store, update);
+        assert_eq!(app.chat().unwrap().selected.as_deref(), Some("5"));
+        assert!(!app.chat().unwrap().viewport.follow && app.chat().unwrap().has_later);
+        for action in app.key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL)) {
+            controller.action(&mut app, action);
+        }
+        let update = tokio::time::timeout(Duration::from_secs(2), work.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        apply_work(&mut app, &mut controller, &store, update);
+        assert!(app.chat().unwrap().viewport.follow);
+        assert_eq!(app.chat().unwrap().selected.as_deref(), Some("105"));
+        server.await.unwrap();
+    }
+    #[tokio::test]
+    async fn unread_jump_waits_for_capture_and_rejects_previous_visit_results() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Store::open(&temp.path().join("db")).await.unwrap();
+        let (tx, _) = mpsc::channel(16);
+        let mut controller = Controller {
+            clipboard: Default::default(),
+            backend: None,
+            store: store.clone(),
+            paths: Paths::discover().unwrap(),
+            tx,
+            connecting: false,
+            status_pending: false,
+            status_again: false,
+        };
+        let mut app = App::new(Config::default());
+        let target = peer("group");
+        app.selected_peer = Some(target.clone());
+        let token = uuid::Uuid::new_v4();
+        app.chats.insert(
+            target.clone(),
+            Chat {
+                unread: UnreadState::Loading { token, jump: false },
+                ..Default::default()
+            },
+        );
+        controller.action(&mut app, Action::FirstUnread);
+        assert!(matches!(
+            app.chat().unwrap().unread,
+            UnreadState::Loading { jump: true, .. }
+        ));
+        apply_work(
+            &mut app,
+            &mut controller,
+            &store,
+            Work::UnreadTarget {
+                peer: target.clone(),
+                token: uuid::Uuid::new_v4(),
+                result: Ok(Some("wrong".into())),
+            },
+        );
+        assert!(matches!(
+            app.chat().unwrap().unread,
+            UnreadState::Loading { .. }
+        ));
+        app.selected_peer = Some(peer("other"));
+        apply_work(
+            &mut app,
+            &mut controller,
+            &store,
+            Work::UnreadTarget {
+                peer: target.clone(),
+                token,
+                result: Ok(Some("5".into())),
+            },
+        );
+        assert_eq!(app.selected_peer, Some(peer("other")));
+        assert!(matches!(app.chats[&target].unread,UnreadState::Ready(Some(ref id)) if id=="5"));
     }
 }
 

@@ -17,6 +17,7 @@
 | conversations.snapshot | account | account、epoch、查询起始 seq、conversations、可空 unread_total（原生主列表提醒计数） |
 | conversations.children | account、群助手 peer | 群助手原生子会话列表 |
 | conversations.read | account、epoch、原生 id、peer | 标记该会话／整个群助手分组已读；返回后须重读原生快照 |
+| conversations.unread | account、群 peer | 最早未读消息的原生 id 或 null；仅查询，不标记已读 |
 | conversations.open | account、epoch、peer | 调用 QQ 原生添加最近会话 |
 | contacts.list | account | items：Conversation 数组 |
 | avatars.resolve | account、发送者原生 uid | 本机 path、资源 version |

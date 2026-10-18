@@ -58,6 +58,8 @@ class Fixture(socketserver.ThreadingUnixStreamServer):
         self.forward_image_path = ""
         self.presentation_enabled = False
         self.muted = False
+        self.unread_enabled = False
+        self.unread_count = 0
         self.avatar_path = ""
         self.second_messages = [dict(message(1),peer=SECOND_PEER,text="other-chat-content")]
         self.clients = []
@@ -72,7 +74,7 @@ class Fixture(socketserver.ThreadingUnixStreamServer):
             epoch="fixture-host",
             seq=self.sequence,
             errors=[],
-            capabilities=["history_navigation", "request_context","reactions","stickers"]+(["avatars","speech_permissions"] if self.presentation_enabled else []),
+            capabilities=["history_navigation", "request_context","reactions","stickers"]+(["unread_anchor"] if self.unread_enabled else [])+(["avatars","speech_permissions"] if self.presentation_enabled else []),
         )
 
     def call(self, method, params):
@@ -97,7 +99,7 @@ class Fixture(socketserver.ThreadingUnixStreamServer):
                         last_id=str(self.latest),
                     ),
                     dict(peer=SECOND_PEER,id="second",name="Other fixture",unread="0",pinned=False,last_id=self.second_messages[-1]["id"]),
-                    dict(peer=GROUP_PEER,id="group",name="Group fixture",unread="0",pinned=False,last_id="5002"),
+                    dict(peer=GROUP_PEER,id="group",name="Group fixture",unread=str(self.unread_count),pinned=False,last_id="5002"),
                 ],
             )
         if method == "contacts.list":
@@ -132,7 +134,10 @@ class Fixture(socketserver.ThreadingUnixStreamServer):
             reaction=dict(emoji_id="14",emoji_type="1",count=str(2 if self.reaction_clicked else 1),clicked=self.reaction_clicked,label="微笑")
             original=dict(message(5001),peer=GROUP_PEER,text="group-fixture-original",is_self=True,reactions=[reaction])
             notice=dict(message(5002),peer=GROUP_PEER,text="[表情回应]",reaction_notice='<gtip><qq jp="123" nm="Alice"/><url msgseq="5001"/><face id="14"/></gtip>')
-            if method == "messages.read":return {}
+            if method == "conversations.unread":return dict(id="4900")
+            if method == "messages.read":
+                self.unread_count=0
+                return {}
             if method == "reactions.set":
                 assert params["epoch"]=="fixture-host" and params["id"]=="5001" and params["emoji_type"]=="1"
                 self.reaction_clicked=params["set"]
@@ -143,6 +148,9 @@ class Fixture(socketserver.ThreadingUnixStreamServer):
                 assert params["seq"]=="5001"
                 return dict(messages=[original])
             assert method == "messages.history",method
+            if params.get("around")=="4900":
+                time.sleep(0.5)
+                return dict(messages=[dict(message(4900),peer=GROUP_PEER,text="unread-origin-fixture https://example.com/unread-origin"),dict(message(4901),peer=GROUP_PEER,text="newer-than-origin https://example.com/not-origin")],has_before=True,has_after=True,anchor_found=True)
             return dict(messages=[original,notice],has_before=False,has_after=False,anchor_found=True)
         assert params["peer"] == PEER
         if method == "messages.read":
@@ -814,6 +822,25 @@ def main():
             wait_for(lambda:"READONLY" not in screen())
             choose_chat("History fixture");wait_for(lambda:"fixture recovery draft" in screen())
             print("Kitty: native avatar gutter, group mute composer protection, unchanged drafts and live unmute passed",flush=True)
+            server.unread_enabled=True;server.unread_count=1000;server.notify_state("status")
+            choose_chat("Group fixture")
+            wait_for(lambda:any(m=="conversations.unread" for m,_ in server.calls))
+            keys("shift+g")
+            wait_for(lambda:server.unread_count==0)
+            server.notify_state("recent.invalidated")
+            keys("g","u")
+            wait_for(lambda:"unread-origin-fixture" in screen())
+            keys("o")
+            wait_for(lambda:"https://example.com/unread-origin" in opened.read_text())
+            keys("ctrl+t")
+            wait_for(lambda:"group-fixture-original" in screen())
+            choose_chat("History fixture");keys("escape","shift+g")
+            card_id=server.latest+1
+            body="card-title-fixture\ncard-description-fixture\nhttps://example.com/card"
+            server.overrides[card_id]=dict(message(card_id),text=body,parts=[dict(type="text",text=body)],card_parts=[0])
+            server.notify_new_message(card_id)
+            wait_for(lambda:"card-title-fixture" in screen() and "┌ 卡片" in screen() and "https://example.com/card" in screen())
+            print("Kitty: card frames and gu jump after unread count clears, with Ctrl+T return, passed",flush=True)
             keys("escape", "q")
             processes[-1].wait(timeout=8)
             server.shutdown()
