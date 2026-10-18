@@ -32,10 +32,14 @@ def main():
     class Notifications(dbus.service.Object):
         @dbus.service.method('org.freedesktop.Notifications',in_signature='susssasa{sv}i',out_signature='u')
         def Notify(self,app,replaces,icon,title,body,actions,hints,timeout):
-            received.append(dict(app=str(app),title=str(title),body=str(body)))
+            received.append(dict(app=str(app),title=str(title),body=str(body),actions=list(actions)))
             return len(received)
+        @dbus.service.signal('org.freedesktop.Notifications',signature='us')
+        def ActionInvoked(self,notice,action):pass
+        @dbus.service.signal('org.freedesktop.Notifications',signature='uu')
+        def NotificationClosed(self,notice,reason):pass
         @dbus.service.method('org.freedesktop.Notifications',out_signature='as')
-        def GetCapabilities(self):return ['body','body-markup']
+        def GetCapabilities(self):return ['body','body-markup','actions']
         @dbus.service.method('org.freedesktop.Notifications',out_signature='ssss')
         def GetServerInformation(self):return ('fixture','qqtui','1','1.2')
     bus=dbus.SessionBus()
@@ -68,6 +72,8 @@ def main():
         root=Path(temporary);env=dict(os.environ,TERM='xterm-256color')
         for key,value in [('XDG_CONFIG_HOME','config'),('XDG_STATE_HOME','state'),('XDG_CACHE_HOME','cache'),('XDG_RUNTIME_DIR','runtime')]:
             path=root/value;path.mkdir(mode=0o700);env[key]=str(path)
+        config=root/'config/qqtui';config.mkdir(mode=0o700)
+        (config/'config.toml').write_text('auto_switch_ime = false\n')
         runtime=root/'runtime/qqtui';runtime.mkdir(mode=0o700)
         server=Fixture(runtime/'bridge.sock');threading.Thread(target=server.serve_forever,daemon=True).start()
         master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',40,120,960,800))
@@ -107,14 +113,25 @@ def main():
             wait(lambda:b'[0] qqtui' in transcript)
             with server.lock:
                 server.sequence+=1
-                event=dict(epoch='fixture-host',account='fixture',seq=server.sequence,kind='notification',notification=dict(items=[dict(key='mail',title='[6] QQ · fixture · Mail',body='<b>mail & text</b>')]))
+                event=dict(epoch='fixture-host',account='fixture',seq=server.sequence,kind='notification',notification=dict(items=[dict(key='mail',title='[6] QQ · fixture · Mail',body='<b>mail & text</b>',target=dict(account='fixture',peer=history.PEER,id='300'))]))
                 for client in server.clients:client.write(dict(jsonrpc='2.0',method='event',params=event))
             wait(lambda:len(received)==1)
             assert received[0]['app']=='qqtui'
             assert received[0]['title'].startswith('[6]')
             assert received[0]['body']=='&lt;b&gt;mail &amp; text&lt;/b&gt;'
+            assert received[0]['actions']==['default','查看消息']
+            with server.lock:
+                server.sequence+=1
+                later=dict(epoch='fixture-host',account='fixture',seq=server.sequence,kind='notification',notification=dict(items=[dict(key='later',title='Later',body='Second alert',target=dict(account='fixture',peer=history.SECOND_PEER,id='400'))]))
+                for client in server.clients:client.write(dict(jsonrpc='2.0',method='event',params=later))
+            wait(lambda:len(received)==2)
+            # Dismissal must not navigate; activation must retain the exact native ID.
+            service.NotificationClosed(99,2);drain(.2)
+            service.ActionInvoked(1,'default')
+            wait(lambda:any(m=='messages.history' and p.get('peer')==history.PEER and p.get('around')=='300' for m,p in server.calls))
+            wait(lambda:b'fixture-message-300' in transcript)
             key(b'q');assert process.wait(timeout=5)==0
-            print('Desktop bus notification, escaped content, unread window title, and mailbox/group assistant conversation menus passed')
+            print('Desktop bus notification, escaped content, unread window title, notification activation to an exact message, and mailbox/group assistant conversation menus passed')
         finally:
             if process.poll() is None:process.terminate();process.wait(timeout=5)
             os.close(master);server.shutdown();server.server_close();loop.quit()

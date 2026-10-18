@@ -34,7 +34,7 @@ url = "2"
 linkify = "0.10"
 roxmltree = "0.21"
 open = {version="5.4.4",features=["shellexecute-on-windows"]}
-notify-rust = { version = "4.16", default-features = false, features = ["z"] }
+notify-rust = { version = "4.18.2", default-features = false, features = ["z"] }
 im-switch = "0.1.0"
 
 [dev-dependencies]

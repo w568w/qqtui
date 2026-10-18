@@ -652,6 +652,7 @@ class NativeBridge {
             })
             .map((c) => ({
               key: `${c.chatType}:${c.peerUid}`,
+              target: { account: this.account, peer: { chat_type: c.chatType, uid: String(c.peerUid) }, id: String(c.msgId) },
               title: `[${unread}] QQ · ${this.account} · ${cleanText(c.remark || c.peerName || c.peerUin || "消息提醒")}`,
               body: cleanText(
                 (c.abstractContent || []).map((e) => e.content || "").join(""),

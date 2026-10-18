@@ -605,6 +605,7 @@ test('native notification decisions preserve important mentions in quiet and ass
   const alerts=()=>events.filter(e=>e.kind==='notification');
   emit({...contact,isOnlineMsg:false});assert.equal(alerts().length,0);
   emit(contact);assert.equal(alerts().length,1);assert.match(alerts()[0].notification.items[0].title,/^\[8\] QQ · 123 · QQ邮箱提醒$/);
+  assert.deepEqual(alerts()[0].notification.items[0].target,{account:'123',peer:{chat_type:contact.chatType,uid:contact.peerUid},id:String(contact.msgId)});
   emit(contact);emit({...contact,msgId:'11',senderUin:'123'});
   emit({...contact,msgId:'12',isMsgDisturb:true,notifiedType:1});
   assert.equal(alerts().length,1);

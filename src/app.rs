@@ -3443,6 +3443,16 @@ impl Controller {
                 .await;
         });
     }
+    fn activate_notification(&mut self, app: &mut App, target: crate::notifications::Target) {
+        if target.account != app.account || target.id.is_empty() || target.id == "0" {
+            return;
+        }
+        app.modal = Modal::None;
+        app.mode = Mode::Normal;
+        app.focus = Focus::Messages;
+        self.action(app, Action::Select(target.peer.clone()));
+        self.jump(app, target.peer, target.id);
+    }
     fn jump(&self, app: &mut App, peer: Peer, id: String) {
         let chat = app.chats.entry(peer.clone()).or_default();
         if chat.jump_back.len() >= 20 {
@@ -4686,6 +4696,11 @@ pub async fn run(paths: Paths) -> Result<()> {
             {
                 app.notice = error;
                 app.dirty = true;
+            }
+            if let Some(notifier) = notifier.as_mut() {
+                while let Ok(target) = notifier.activated.try_recv() {
+                    controller.activate_notification(&mut app, target);
+                }
             }
             if app.dirty {
                 if app.media_reset {media.clear_context();app.media_reset=false;}
@@ -6235,6 +6250,40 @@ mod tests {
         chat.receive(vec![target]);
         assert_eq!(chat.selected.as_deref(), Some("1"));
         assert_eq!(chat.messages[0].reactions[0].count, "3");
+    }
+    #[tokio::test]
+    async fn notification_activation_keeps_account_and_message_identity_and_suspends_follow() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Store::open(&temp.path().join("db")).await.unwrap();
+        let (tx, _rx) = mpsc::channel(8);
+        let mut controller = Controller {
+            clipboard: Default::default(),
+            backend: None,
+            store,
+            paths: Paths::discover().unwrap(),
+            tx,
+            connecting: false,
+            status_pending: false,
+            status_again: false,
+        };
+        let mut app = App::new(Config::default());
+        app.account = "a".into();
+        let mut target = crate::notifications::Target {
+            account: "b".into(),
+            peer: peer("target"),
+            id: "300".into(),
+        };
+        controller.activate_notification(&mut app, target.clone());
+        assert!(app.selected_peer.is_none());
+        app.chats.entry(target.peer.clone()).or_default().draft.text = "draft".into();
+        target.account = "a".into();
+        controller.activate_notification(&mut app, target);
+        assert_eq!(app.selected_peer, Some(peer("target")));
+        let chat = app.chat().unwrap();
+        assert_eq!(chat.viewport.anchor.as_deref(), Some("300"));
+        assert!(!chat.viewport.follow);
+        assert_eq!(chat.draft.text, "draft");
+        assert!(app.focus == Focus::Messages);
     }
     #[tokio::test]
     async fn sticker_cancel_and_late_preview_results_cannot_modify_the_new_picker_or_draft() {
