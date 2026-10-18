@@ -618,6 +618,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "core-foundation"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2a6cd9ae233e7f62ba4e9353e81a88df7fc8a5987b8d445b4d90c879bd156f6"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+]
+
+[[package]]
 name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -994,6 +1004,18 @@ name = "fax"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caf1079563223d5d59d83c85886a56e586cfd5c1a26292e971a0fa266531ac5a"
+
+[[package]]
+name = "fcitx5-dbus"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "837c522144376944f20f63befc2ee103222ca9789c179c95544e8cbe475d6e05"
+dependencies = [
+ "bitflags 2.13.2",
+ "enumflags2",
+ "serde",
+ "zbus",
+]
 
 [[package]]
 name = "fdeflate"
@@ -1554,6 +1576,19 @@ checksum = "cb68373c0d6620ef8105e855e7745e18b0d00d3bdb07fb532e434244cdb9a714"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
+]
+
+[[package]]
+name = "im-switch"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "044a052a00218ed53790140606e8f6dbb35759847f1c4b9ee9aef34c611ba562"
+dependencies = [
+ "clap",
+ "core-foundation",
+ "fcitx5-dbus",
+ "thiserror 2.0.21",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -2432,6 +2467,7 @@ dependencies = [
  "freedesktop-desktop-entry",
  "fs2",
  "futures",
+ "im-switch",
  "image",
  "linkify",
  "nix 0.30.1",

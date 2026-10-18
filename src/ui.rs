@@ -1175,6 +1175,13 @@ fn image_preview(
         frame.render_widget(Paragraph::new("正在加载图片…"), area);
     }
 }
+fn input_cursor(frame: &mut Frame, area: Rect, text: &str) {
+    if area.width > 0 && area.height > 0 {
+        let column = (2 + safe_text(text).width()).min(area.width as usize - 1) as u16;
+        frame.set_cursor_position((area.x + column, area.y));
+    }
+}
+
 fn draw_modal(
     frame: &mut Frame,
     app: &mut App,
@@ -1224,6 +1231,7 @@ fn draw_modal(
             Paragraph::new(format!("> {}", safe_text(query))),
             query_area,
         );
+        input_cursor(frame, query_area, query);
         let choices = sticker_choices(items, query);
         let [body, caption] =
             Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(body);
@@ -1766,6 +1774,9 @@ fn draw_modal(
         Paragraph::new(format!("> {}", safe_text(&query))).style(Style::default().fg(CYAN)),
         input,
     );
+    if app.modal.accepts_text() {
+        input_cursor(frame, input, &query);
+    }
     let items = items.into_iter().map(|(s, enabled)| {
         ListItem::new(safe_text(&s)).style(Style::default().fg(if enabled {
             Color::White

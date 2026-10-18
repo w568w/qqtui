@@ -19,6 +19,8 @@ pub struct Config {
     pub sidebar_width: u16,
     pub sidebar_visible: bool,
     pub show_avatars: bool,
+    pub auto_switch_ime: bool,
+    pub ime_ascii: Option<String>,
     pub novnc_path: Option<PathBuf>,
     pub keymap: std::collections::BTreeMap<String, String>,
 }
@@ -30,6 +32,8 @@ impl Default for Config {
             sidebar_width: 26,
             sidebar_visible: true,
             show_avatars: true,
+            auto_switch_ime: true,
+            ime_ascii: None,
             novnc_path: None,
             keymap: Default::default(),
         }

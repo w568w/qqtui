@@ -417,6 +417,9 @@ def main():
                 XDG_CONFIG_HOME=str(base / "config"),
                 XDG_CACHE_HOME=str(base / "cache"),
             )
+            config = base / "config" / "qqtui"
+            config.mkdir(parents=True, exist_ok=True)
+            (config / "config.toml").write_text("auto_switch_ime = false\n")
             # Kitty placeholders encode image IDs in truecolor foreground channels.
             environment.pop("NO_COLOR", None)
             address = "unix:" + str(base / "kitty.sock")

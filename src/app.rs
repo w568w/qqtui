@@ -617,6 +617,17 @@ pub enum Modal {
     Profile(Profile),
 }
 impl Modal {
+    pub fn accepts_text(&self) -> bool {
+        matches!(
+            self,
+            Self::EmojiPicker { .. }
+                | Self::Switcher { .. }
+                | Self::Search { .. }
+                | Self::AttachmentPath { .. }
+                | Self::Members { .. }
+                | Self::Contacts { .. }
+        )
+    }
     pub fn is_open(&self) -> bool {
         !matches!(self, Self::None)
     }
@@ -4634,6 +4645,9 @@ pub async fn run(paths: Paths) -> Result<()> {
         .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks());
     let mut media = media::Media::new(picker);
     media.owned_cache = Some(paths.cache.clone());
+    let input_method =
+        crate::ime::InputMethod::start(app.config.auto_switch_ime, app.config.ime_ascii.clone());
+    let mut ime_focused = true;
     let mut terminal_events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(50));
     let mut last_connect = Instant::now() - Duration::from_secs(3);
@@ -4650,6 +4664,10 @@ pub async fn run(paths: Paths) -> Result<()> {
         while !app.quit {
             controller.drain_updates(&mut app, &mut native_rx, &mut work_rx);
             app.bound_windows();
+            if let Some(ime) = &input_method {
+                ime.update(ime_focused, app.modal.accepts_text()
+                    || (!app.modal.is_open() && app.mode == Mode::Insert && app.draft_editable()));
+            }
             if let Some(notifier) = notifier.as_ref()
                 && !app.notifications.is_empty()
             {
@@ -4717,7 +4735,15 @@ pub async fn run(paths: Paths) -> Result<()> {
             }
             tokio::select! {
                 event=terminal_events.next()=>match event {
-                    Some(Ok(event))=>{if matches!(event,TerminalEvent::Resize(..)){media.invalidate();}let actions=app.terminal(event);for action in actions{controller.action(&mut app,action);}},
+                    Some(Ok(event)) => {
+                        match event {
+                            TerminalEvent::FocusLost => ime_focused = false,
+                            TerminalEvent::FocusGained | TerminalEvent::Key(_) | TerminalEvent::Mouse(_) => ime_focused = true,
+                            _ => {}
+                        }
+                        if matches!(event, TerminalEvent::Resize(..)) { media.invalidate(); }
+                        for action in app.terminal(event) { controller.action(&mut app, action); }
+                    },
                     Some(Err(e))=>return Err(e.into()),None=>app.quit=true,
                 },
                 Some(result)=media.rx.recv()=>{media.complete(result);app.dirty=true;},
@@ -4784,6 +4810,9 @@ pub async fn run(paths: Paths) -> Result<()> {
         crate::runtime::save_ui_config(&paths, &app.config)?;
     }
     media.clear_graphics();
+    if let Some(ime) = input_method {
+        ime.finish().await;
+    }
     interface_result
 }
 fn apply_receipt(app: &mut App, store: &Store, tx: &mpsc::Sender<Work>, receipt: Receipt) {
