@@ -2,27 +2,37 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag
+        required: true
+        type: string
 permissions:
   contents: write
 jobs:
   linux:
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     runs-on: ubuntu-24.04
     container:
       image: archlinux:base-devel@sha256:d6979123107e7a9f52c2de19104966b5f809e13a4593017780bd8c0b140f80ff
     steps:
       - run: pacman -Syu --noconfirm --needed rust sqlite git github-cli python nodejs
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
       - name: Check and build
         run: |
           version=$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
-          test "$GITHUB_REF_NAME" = "v$version"
+          test "$RELEASE_TAG" = "v$version"
           cargo build --release --locked
           target/release/qqtui --version
           node --test tests/native.test.cjs tests/journal.test.cjs tests/desktop.test.cjs
           python tests/loader.test.py
       - name: Package
         run: |
-          archive="qqtui-${GITHUB_REF_NAME#v}-linux-x86_64"
+          archive="qqtui-${RELEASE_TAG#v}-linux-x86_64"
           install -Dm755 target/release/qqtui "$archive/qqtui"
           cp -r packaging docs "$archive/"
           cp README.md CONTRIBUTING.md LICENSE "$archive/"
@@ -31,4 +41,4 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" qqtui-*-linux-x86_64.tar.gz --verify-tag --generate-notes
+        run: gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" qqtui-*-linux-x86_64.tar.gz --verify-tag --generate-notes
