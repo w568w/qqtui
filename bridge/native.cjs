@@ -2020,15 +2020,26 @@ class NativeBridge {
     const v = e.picElement ?? e.fileElement ?? e.videoElement ?? e.pttElement;
     const source = v?.sourcePath || v?.filePath || "";
     if (source && fs.existsSync(source)) return { path: source };
+    let resourceError;
     if (
       forwarded &&
       e.picElement &&
       (/^https?:\/\//i.test(v.originImageUrl || "") ||
         /^[a-fA-F0-9]{32}$/.test(v.md5HexStr || ""))
     ) {
-      const local = await this.resources.image(v);
+      try {
+        const local = await this.resources.image(v);
+        context.check();
+        return { path: local };
+      } catch (error) {
+        context.check();
+        resourceError = error;
+        // A stale URL or a missing legacy CDN copy must not bypass QQ's downloader.
+      }
+    }
+    if (source && path.isAbsolute(source)) {
+      await fs.promises.mkdir(path.dirname(source), { recursive: true, mode: 0o700 });
       context.check();
-      return { path: local };
     }
     const key = `${p.id}:${p.element_id}`;
     const identity = JSON.stringify([peer, p.forward_path || []]);
@@ -2110,6 +2121,7 @@ class NativeBridge {
       context.check();
       if (!e.picElement) throw nativeError;
       try {
+        if (resourceError) throw resourceError;
         const local = await this.resources.image(v);
         context.check();
         return { path: local };

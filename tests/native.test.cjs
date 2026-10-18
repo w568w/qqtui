@@ -513,6 +513,24 @@ test('forwarded images retain QQ supplied URL authentication and share a bounded
   assert.equal(fetches,1);
 });
 
+test('a stale forwarded image URL falls back to native download and creates its QQ supplied parent',async t=>{
+  const {b,dir}=fixture(t);let attempts=0;
+  const file=path.join(dir,'native','images','picture.png');
+  const root={msgId:'10',chatType:1,peerUid:'u_self',elements:[{multiForwardMsgElement:{xmlContent:'<msg/>'}}]};
+  const child={msgId:'12',chatType:2,peerUid:'789',elements:[{elementId:'8',picElement:{fileName:'picture.png',sourcePath:file,md5HexStr:'0123456789abcdef0123456789abcdef',originImageUrl:'https://gchat.qpic.cn/expired'}}]};
+  b.msg.getMsgsByMsgId=async()=>({result:0,msgList:[root]});
+  b.msg.getMultiMsg=async()=>({result:0,msgList:[child]});
+  b.resources.image=async()=>{attempts++;throw new Error('HTTP 404');};
+  b.session.getRichMediaService=()=>({downloadRichMediaInVisit:args=>{
+    assert.equal(args.elem,child.elements[0]);
+    fs.writeFileSync(file,'native picture');
+    b.mediaWaiters.get('12:8').finish(null,{filePath:file});
+    return {result:0};
+  }});
+  const result=await b.call('media.resolve',{account:'123',peer,id:'12',element_id:'8',forward_path:['10']},{});
+  assert.equal(result.path,file);assert.equal(attempts,1);
+});
+
 test('QQ legacy picture references use the upstream CDN grammar without resource-key services',async t=>{
   const {dir}=fixture(t);const resources=new QqResources({stateDir:dir});let fetches=0;
   const md5=require('node:crypto').createHash('md5').update('GIF89a').digest('hex');
