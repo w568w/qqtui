@@ -733,7 +733,19 @@ pub fn draw(frame: &mut Frame, app: &mut App, media: &mut Media) -> DrawWork {
                 })
             })
             .collect();
-        if chat.loaded && !chat.has_later && chat.view_height > 0 && start == max_start {
+        let viewport_ready = !chat.loading
+            && (chat.viewport.follow
+                || chat
+                    .viewport
+                    .anchor
+                    .as_ref()
+                    .is_none_or(|anchor| chat.rows.iter().any(|(id, _, _)| id == anchor)));
+        if chat.loaded
+            && viewport_ready
+            && !chat.has_later
+            && chat.view_height > 0
+            && start == max_start
+        {
             if !chat.viewport.follow {
                 work.redraw = true;
             }
@@ -744,19 +756,16 @@ pub fn draw(frame: &mut Frame, app: &mut App, media: &mut Media) -> DrawWork {
                 work.quotes.push(message);
             }
         }
-        work.readable =
-            !modal_open && chat.view_height > 0 && !chat.rows.is_empty() && start == max_start;
+        work.readable = !modal_open
+            && viewport_ready
+            && chat.view_height > 0
+            && !chat.rows.is_empty()
+            && start == max_start;
         if work.readable && !chat.has_later && chat.new_messages > 0 {
             chat.new_messages = 0;
             work.redraw = true;
         }
-        let anchor_available = chat.viewport.follow
-            || chat
-                .viewport
-                .anchor
-                .as_ref()
-                .is_none_or(|anchor| chat.rows.iter().any(|(id, _, _)| id == anchor));
-        if anchor_available
+        if viewport_ready
             && let Some((id, s, _)) = chat.rows.iter().find(|(_, s, e)| *s <= start && start < *e)
         {
             chat.viewport.anchor = Some(id.clone());

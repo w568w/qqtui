@@ -6372,6 +6372,38 @@ mod tests {
         assert!(screen(&terminal).contains("new-at-bottom"));
     }
     #[test]
+    fn unresolved_jump_anchor_is_not_replaced_by_old_bottom_rows() {
+        for loading in [false, true] {
+            let mut app = App::new(Config::default());
+            app.selected_peer = Some(peer("self"));
+            let mut chat = Chat {
+                loaded: true,
+                loading,
+                ..Default::default()
+            };
+            chat.merge(vec![msg("105", "105")]);
+            chat.selected = Some("5".into());
+            chat.viewport = Viewport {
+                anchor: Some("5".into()),
+                line: 0,
+                follow: false,
+            };
+            app.chats.insert(peer("self"), chat);
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+            let mut media = media::Media::new(ratatui_image::picker::Picker::halfblocks());
+            terminal
+                .draw(|frame| {
+                    assert!(!crate::ui::draw(frame, &mut app, &mut media).readable);
+                })
+                .unwrap();
+            let chat = app.chat().unwrap();
+            assert!(!chat.viewport.follow);
+            assert_eq!(chat.viewport.anchor.as_deref(), Some("5"));
+            assert_eq!(chat.selected.as_deref(), Some("5"));
+        }
+    }
+    #[test]
     fn native_order_updates_keep_selected_identity() {
         let mut app = App::new(Config::default());
         app.apply_snapshot(Snapshot {
