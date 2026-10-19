@@ -837,17 +837,9 @@ class NativeBridge {
             .then((receipt) => {
               if (!receipt) return;
               this.remember(receipt);
-              const m = message(raw, account, this.resources);
-              if (receipt.state === "confirmed" && m.send_status !== 2) return;
-              receipt.message_id = m.id;
-              receipt.state =
-                m.send_status === 2
-                  ? "confirmed"
-                  : m.send_status === 0
-                    ? "failed"
-                    : "unknown";
-              return this.saveJournal(receipt).then(() =>
-                this.event("send.updated", { receipt }),
+              return this.updateReceipt(
+                receipt,
+                message(raw, account, this.resources),
               );
             })
             .catch((error) =>
@@ -883,20 +875,7 @@ class NativeBridge {
           (receipt.native_id !== m.id && receipt.native_id !== m.correlation)
         )
           continue;
-        if (receipt.state === "confirmed" && m.send_status !== 2) continue;
-        receipt.message_id = m.id;
-        receipt.state =
-          m.send_status === 2
-            ? "confirmed"
-            : m.send_status === 3
-              ? "unknown"
-              : m.send_status === 0
-                ? "failed"
-                : receipt.state;
-        if (receipt.state === "failed") receipt.error = "QQ 原生发送失败";
-        this.saveJournal(receipt)
-          .then(() => this.event("send.updated", { receipt }))
-          .catch(() => {});
+        this.updateReceipt(receipt, m);
       }
     const routable = (raw) =>
       Number.isInteger(raw.chatType) &&
@@ -922,6 +901,23 @@ class NativeBridge {
     if (partial.length) this.event("reactions.updated", { messages: partial });
     if (complete.length + partial.length < messages.length)
       this.event("messages.invalidated");
+  }
+  updateReceipt(receipt, m) {
+    receipt.message_id = m.id;
+    let next = receipt.state;
+    if (next === "confirmed" && m.send_status !== 2) return null;
+    if (m.send_status === 2) next = "confirmed";
+    else if (m.send_status === 0) next = "failed";
+    else if (m.send_status === 3) next = "unknown";
+    if (next === receipt.state) return null;
+    receipt.state = next;
+    if (next === "failed" && !receipt.error) receipt.error = "QQ 原生发送失败";
+    return this.settle(receipt);
+  }
+  settle(receipt) {
+    return this.saveJournal(receipt)
+      .then(() => this.event("send.updated", { receipt }))
+      .catch(() => {});
   }
   saveJournal(receipt) {
     const result = this.journalStore.put(
@@ -1959,36 +1955,24 @@ class NativeBridge {
               receipt.error = e.message;
             }
           }
-          this.saveJournal(receipt)
-            .then(() => this.event("send.updated", { receipt }))
-            .catch(() => {});
+          this.settle(receipt);
         })
         .catch((e) => {
           if (receipt.state !== "confirmed") {
             receipt.state = "unknown";
             receipt.error = e.message;
           }
-          try {
-            this.saveJournal(receipt)
-              .then(() => this.event("send.updated", { receipt }))
-              .catch(() => {});
-          } catch (error) {
-            console.error("[qqtui] send journal:", error.message);
-          }
+          this.settle(receipt);
         });
     } catch (e) {
       receipt.state = "unknown";
       receipt.error = e.message;
     }
-    this.saveJournal(receipt)
-      .then(() => this.event("send.updated", { receipt }))
-      .catch(() => {});
+    this.settle(receipt);
     const timer = setTimeout(() => {
       if (["submitting", "submitted"].includes(receipt.state)) {
         receipt.state = "unknown";
-        this.saveJournal(receipt)
-          .then(() => this.event("send.updated", { receipt }))
-          .catch(() => {});
+        this.settle(receipt);
       }
     }, 12000);
     timer.unref();

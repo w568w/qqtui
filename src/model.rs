@@ -14,6 +14,18 @@ impl Peer {
     pub fn key(&self) -> String {
         format!("{}:{}", self.chat_type, self.uid)
     }
+    pub fn is_group(&self) -> bool {
+        self.chat_type == 2
+    }
+    pub fn is_folder(&self) -> bool {
+        self.chat_type == 7
+    }
+    pub fn is_device(&self) -> bool {
+        self.chat_type == 8
+    }
+    pub fn is_mailbox(&self) -> bool {
+        self.chat_type == 103
+    }
 }
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Conversation {
@@ -48,6 +60,11 @@ pub struct Attachment {
     pub width: u32,
     #[serde(default)]
     pub height: u32,
+}
+impl Attachment {
+    pub fn is_image_like(&self) -> bool {
+        matches!(self.kind.as_str(), "image" | "sticker" | "emoji")
+    }
 }
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Reaction {
@@ -137,6 +154,9 @@ pub fn next_message_revision() -> u64 {
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 impl Message {
+    pub fn image_attachments(&self) -> impl Iterator<Item = &Attachment> {
+        self.attachments.iter().filter(|a| a.is_image_like())
+    }
     pub fn touch(&mut self) {
         self.revision = next_message_revision();
     }

@@ -282,6 +282,9 @@ pub fn forward_summary(xml: &str) -> Vec<String> {
     lines.push("└ Enter 查看聊天记录".into());
     lines
 }
+fn clamped_scroll_offset(row: usize, start: usize) -> i16 {
+    (row as i32 - start as i32).clamp(i16::MIN as i32, i16::MAX as i32) as i16
+}
 fn panel(title: String, focused: bool) -> Block<'static> {
     Block::default()
         .title(title)
@@ -377,10 +380,7 @@ fn avatar(
             frame.render_widget(
                 SlicedImage::new(
                     protocol,
-                    SignedPosition::from((
-                        0,
-                        (row as i32 - start as i32).clamp(i16::MIN as i32, i16::MAX as i32) as i16,
-                    )),
+                    SignedPosition::from((0, clamped_scroll_offset(row, start))),
                 ),
                 Rect::new(area.x + 1, area.y, 4, area.height),
             );
@@ -477,7 +477,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, media: &mut Media) -> DrawWork {
     let avatar_paths = app.avatars.clone();
     let avatars_enabled = app.config.show_avatars;
     let speech = if app.capabilities.contains("speech_permissions")
-        && app.selected_peer.as_ref().is_some_and(|p| p.chat_type == 2)
+        && app.selected_peer.as_ref().is_some_and(|p| p.is_group())
     {
         app.chat().and_then(|c| {
             c.permission.as_ref().map_or_else(
@@ -879,11 +879,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, media: &mut Media) -> DrawWork {
                     frame.render_widget(
                         SlicedImage::new(
                             protocol,
-                            SignedPosition::from((
-                                0,
-                                (row as i32 - start as i32).clamp(i16::MIN as i32, i16::MAX as i32)
-                                    as i16,
-                            )),
+                            SignedPosition::from((0, clamped_scroll_offset(row, start))),
                         ),
                         Rect::new(rect.x, messages_area.y, rect.width, messages_area.height),
                     );
@@ -1060,11 +1056,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, media: &mut Media) -> DrawWork {
             width,
             height,
         );
-        let images: Vec<_> = message
-            .attachments
-            .iter()
-            .filter(|a| matches!(a.kind.as_str(), "image" | "sticker" | "emoji"))
-            .collect();
+        let images: Vec<_> = message.image_attachments().collect();
         let index = images
             .iter()
             .position(|a| a.element_id == attachment.element_id)
@@ -1486,11 +1478,7 @@ fn draw_modal(
                 frame.render_widget(
                     SlicedImage::new(
                         protocol,
-                        SignedPosition::from((
-                            0,
-                            (row as i32 - *scroll as i32).clamp(i16::MIN as i32, i16::MAX as i32)
-                                as i16,
-                        )),
+                        SignedPosition::from((0, clamped_scroll_offset(row, *scroll))),
                     ),
                     target,
                 );
@@ -1663,7 +1651,7 @@ fn draw_modal(
             format!("会话动作 · {}", safe_text(&conversation.name)),
             String::new(),
             vec![(
-                if conversation.peer.chat_type == 7 {
+                if conversation.peer.is_folder() {
                     "整个分组标为已读".into()
                 } else {
                     "标为已读".into()
@@ -1730,11 +1718,7 @@ fn draw_modal(
                     (
                         format!(
                             "{} {}{}",
-                            if c.peer.chat_type == 2 {
-                                "群"
-                            } else {
-                                "好友"
-                            },
+                            if c.peer.is_group() { "群" } else { "好友" },
                             c.name,
                             if c.unread == "0" {
                                 String::new()
