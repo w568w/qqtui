@@ -259,6 +259,17 @@ fn config_lock(paths: &Paths) -> Result<fs::File> {
 pub fn set_qq_path(paths: &Paths, path: &Path) -> Result<()> {
     paths.create()?;
     let path = path.canonicalize()?;
+    update_config(paths, |document| {
+        document["qq_path"] = toml_edit::value(path.to_string_lossy().as_ref());
+    })
+}
+pub fn save_ui_config(paths: &Paths, config: &Config) -> Result<()> {
+    update_config(paths, |document| {
+        document["sidebar_width"] = toml_edit::value(i64::from(config.sidebar_width));
+        document["sidebar_visible"] = toml_edit::value(config.sidebar_visible);
+    })
+}
+fn update_config(paths: &Paths, update: impl FnOnce(&mut toml_edit::DocumentMut)) -> Result<()> {
     let _lock = config_lock(paths)?;
     let config = paths.config.join("config.toml");
     let mut document = match fs::read_to_string(&config) {
@@ -266,32 +277,12 @@ pub fn set_qq_path(paths: &Paths, path: &Path) -> Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => toml_edit::DocumentMut::new(),
         Err(error) => return Err(error.into()),
     };
-    document["qq_path"] = toml_edit::value(path.to_string_lossy().as_ref());
+    update(&mut document);
     let temporary = paths
         .config
         .join(format!(".config-{}.tmp", uuid::Uuid::new_v4()));
     private_write(&temporary, document.to_string())?;
     fs::rename(temporary, config)?;
-    #[cfg(unix)]
-    fs::File::open(&paths.config)?.sync_all()?;
-    Ok(())
-}
-pub fn save_ui_config(paths: &Paths, config: &Config) -> Result<()> {
-    let _lock = config_lock(paths)?;
-    let path = paths.config.join("config.toml");
-    let text = match fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(e.into()),
-    };
-    let mut document = text.parse::<toml_edit::DocumentMut>()?;
-    document["sidebar_width"] = toml_edit::value(i64::from(config.sidebar_width));
-    document["sidebar_visible"] = toml_edit::value(config.sidebar_visible);
-    let temp = paths
-        .config
-        .join(format!(".config-{}.tmp", uuid::Uuid::new_v4()));
-    private_write(&temp, document.to_string())?;
-    fs::rename(temp, path)?;
     #[cfg(unix)]
     fs::File::open(&paths.config)?.sync_all()?;
     Ok(())

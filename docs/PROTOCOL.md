@@ -99,4 +99,4 @@ SpeechPermission.can_moderate 表示 QQ 原生群主／管理员身份，可申�
 
 SpeechPermission.state 为 allowed／blocked／unknown；scope 为 none／all／self／unknown，reason 表达可确认的原生限制，until 是可空的原生结束时间字符串。全员禁言结合本人成员角色判断豁免，个人禁言按实际到期时间判断。查询结果不能代替提交前的原生权限检查。
 
-回执字符串状态保持不变。桥接 SQLite worker 在原生提交前事务性保存请求标识、关联标识、指纹和回执；已终结记录保留最小去重信息。首次从旧 JSON 日志备份并迁移，失败时拒绝提交；不因重启、客户端超时或结果未知而自动再次发送。
+回执字符串状态保持不变。桥接 SQLite worker 在原生提交前事务性保存请求标识、关联标识、指纹和回执；已终结记录保留最小去重信息。日志写入失败时拒绝提交；不因重启、客户端超时或结果未知而自动再次发送。

@@ -6,9 +6,9 @@ const os = require("node:os");
 const path = require("node:path");
 const { Journal } = require("../bridge/journal.cjs");
 const { permission } = require("../bridge/presentation.cjs");
-test("journal migrates once, preserves deduplication and never downgrades confirmation", async () => {
+test("journal recovers pending receipts and never downgrades confirmation", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qqtui-journal-"));
-  const file = path.join(dir, "send.json");
+  const file = path.join(dir, "send-journal.sqlite3");
   const record = {
     account: "123",
     request_id: "old",
@@ -16,14 +16,12 @@ test("journal migrates once, preserves deduplication and never downgrades confir
     peer: { chat_type: 1, uid: "u" },
     state: "submitted",
   };
-  fs.writeFileSync(file, JSON.stringify([["123:old", record]]));
   let journal = new Journal(file);
   try {
+    await journal.put("123:old", record);
+    await journal.close();
+    journal = new Journal(file);
     assert.equal((await journal.get("123:old")).state, "unknown");
-    assert.equal(
-      fs.readFileSync(file, "utf8"),
-      fs.readFileSync(file + ".before-sqlite", "utf8"),
-    );
     await journal.put("123:old", { ...record, state: "confirmed" });
     await journal.put("123:old", { ...record, state: "submitted" });
     assert.equal((await journal.byNative("123", "99")).state, "confirmed");
@@ -36,9 +34,9 @@ test("journal migrates once, preserves deduplication and never downgrades confir
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
-test("invalid legacy journals fail closed without altering the source", async () => {
+test("invalid SQLite journals fail closed without altering the source", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qqtui-journal-invalid-"));
-  const file = path.join(dir, "send.json");
+  const file = path.join(dir, "send-journal.sqlite3");
   fs.writeFileSync(file, "broken");
   const journal = new Journal(file);
   try {

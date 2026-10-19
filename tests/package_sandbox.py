@@ -139,9 +139,8 @@ try:
     import sqlite3
 
     with sqlite3.connect(journal.as_uri() + "?mode=ro", uri=True) as db:
-        assert db.execute("SELECT value FROM meta WHERE key='legacy'").fetchone() == (
-            "1",
-        )
+        assert db.execute("PRAGMA user_version").fetchone() == (1,)
+        db.execute("SELECT key, account, native_id, data FROM receipts LIMIT 1")
     print(
         "QQ embedded SQLite worker capability and journal initialization: passed",
         flush=True,

@@ -331,7 +331,7 @@ class NativeBridge {
     this.options = options;
     this.journal = path.join(
       options.stateDir || path.dirname(socketPath),
-      "send-journal.json",
+      "send-journal.sqlite3",
     );
     this.resources = new QqResources({
       ...options,
@@ -517,7 +517,6 @@ class NativeBridge {
       epoch: this.epoch,
       seq: this.seq,
       qq_version: this.options.qqVersion || "",
-      framework: this.options.framework || "native",
       errors: [...this.errors, ...this.resources.errors],
       recent_shape: this.recentShape,
       capabilities,

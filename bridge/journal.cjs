@@ -16,7 +16,7 @@ if (!isMainThread) {
     if (db.prepare("PRAGMA user_version").get().user_version > 1)
       throw new Error("发送日志版本高于当前程序，拒绝降级");
     db.exec(
-      "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS receipts(key TEXT PRIMARY KEY,account TEXT NOT NULL,native_id TEXT NOT NULL,data TEXT NOT NULL); CREATE INDEX IF NOT EXISTS receipt_native ON receipts(account,native_id); CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT);",
+      "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS receipts(key TEXT PRIMARY KEY,account TEXT NOT NULL,native_id TEXT NOT NULL,data TEXT NOT NULL); CREATE INDEX IF NOT EXISTS receipt_native ON receipts(account,native_id);",
     );
     db.exec("PRAGMA user_version=1");
     const compact = (r) => {
@@ -38,41 +38,6 @@ if (!isMainThread) {
     const put = db.prepare(
       "INSERT INTO receipts VALUES(?,?,?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data,native_id=excluded.native_id WHERE json_extract(receipts.data,'$.state')!='confirmed' OR json_extract(excluded.data,'$.state')='confirmed'",
     );
-    if (!db.prepare("SELECT 1 FROM meta WHERE key='legacy'").get()) {
-      if (fs.existsSync(workerData.legacy)) {
-        if (fs.statSync(workerData.legacy).size > 16 * 1024 * 1024)
-          throw new Error(
-            "旧发送日志超过自动迁移上限，请先导出迁移；未修改旧文件",
-          );
-        const bytes = fs.readFileSync(workerData.legacy);
-        const rows = JSON.parse(bytes);
-        if (!Array.isArray(rows))
-          throw new Error("Invalid legacy send journal");
-        const backup = workerData.legacy + ".before-sqlite";
-        try {
-          fs.copyFileSync(
-            workerData.legacy,
-            backup,
-            fs.constants.COPYFILE_EXCL,
-          );
-        } catch (e) {
-          if (e.code !== "EEXIST") throw e;
-        }
-        db.exec("BEGIN IMMEDIATE");
-        try {
-          for (const [key, r] of rows) {
-            if (typeof key !== "string" || !r.account || !r.request_id)
-              throw new Error("Invalid legacy receipt");
-            put.run(key, r.account, r.native_id || "", compact(r));
-          }
-          db.prepare("INSERT INTO meta VALUES(?,?)").run("legacy", "1");
-          db.exec("COMMIT");
-        } catch (e) {
-          db.exec("ROLLBACK");
-          throw e;
-        }
-      } else db.prepare("INSERT INTO meta VALUES(?,?)").run("legacy", "1");
-    }
     db.exec(
       "UPDATE receipts SET data=json_set(data,'$.state','unknown') WHERE json_extract(data,'$.state') IN ('submitting','submitted')",
     );
@@ -120,13 +85,7 @@ if (!isMainThread) {
       if (this.opening) return this.opening;
       this.opening = new Promise((resolve, reject) => {
         const worker = (this.worker = new Worker(__filename, {
-          workerData: {
-            database: require("node:path").join(
-              require("node:path").dirname(this.file),
-              "send-journal.sqlite3",
-            ),
-            legacy: this.file,
-          },
+          workerData: { database: this.file },
         }));
         worker.unref();
         const failed = (error) => {
@@ -157,7 +116,7 @@ if (!isMainThread) {
             : waiter.resolve(reply.result);
         });
       });
-      // Keep the worker alive until capability checking and migration finish.
+      // Keep the worker alive until database initialization finishes.
       this.worker.ref();
       try {
         await this.opening;

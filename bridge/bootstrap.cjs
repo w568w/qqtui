@@ -23,7 +23,6 @@ const bridge = new NativeBridge(process.env.QQTUI_SOCKET, {
   userData: accounts.root,
   qqVersion: app.getVersion(),
   desktop,
-  framework: compatibility?.framework,
 });
 
 bridge.listen();

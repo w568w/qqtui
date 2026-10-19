@@ -571,6 +571,14 @@ mod tests {
         assert_eq!(decoded.qq_path, PathBuf::from("/custom/QQ"));
         assert_eq!(decoded.sidebar_width, 32);
         assert!(!decoded.sidebar_visible);
+        set_qq_path(&paths, temp.path()).unwrap();
+        let saved = fs::read_to_string(paths.config.join("config.toml")).unwrap();
+        let decoded: Config = toml::from_str(&saved).unwrap();
+        assert_eq!(decoded.qq_path, temp.path().canonicalize().unwrap());
+        assert_eq!(decoded.sidebar_width, 32);
+        assert!(!decoded.sidebar_visible);
+        assert!(saved.contains("# preserved"));
+        assert!(saved.contains("value = 42"));
     }
     #[test]
     fn updating_the_bridge_preserves_the_loader_already_opened_by_a_running_host() {
