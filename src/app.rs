@@ -4702,7 +4702,11 @@ pub async fn run(paths: Paths) -> Result<()> {
                     controller.activate_notification(&mut app, target);
                 }
             }
-            if app.dirty {
+            if app.dirty || media.has_terminal_output() {
+                if !app.dirty {
+                    media.flush_retired();
+                    continue;
+                }
                 if app.media_reset {media.clear_context();app.media_reset=false;}
                 let title = crate::notifications::title(
                     &app.account,
@@ -4761,7 +4765,9 @@ pub async fn run(paths: Paths) -> Result<()> {
                     },
                     Some(Err(e))=>return Err(e.into()),None=>app.quit=true,
                 },
-                Some(result)=media.rx.recv()=>{media.complete(result);app.dirty=true;},
+                Some(result)=media.rx.recv()=>{
+                    app.dirty |= media.complete(result);
+                },
                 Some(event)=native_rx.recv()=>controller.event(&mut app,event),
                 Some(work)=work_rx.recv()=>apply_work(&mut app,&mut controller,&store,work),
                 _=tick.tick()=>{

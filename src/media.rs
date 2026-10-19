@@ -1,5 +1,6 @@
 use crate::model::Attachment;
 use anyhow::{Context, Result, bail};
+use base64::Engine;
 use ratatui_image::{
     Resize,
     picker::{Picker, ProtocolType},
@@ -69,6 +70,11 @@ pub enum ImageOutcome {
         index: usize,
         kitty_id: u32,
     },
+    KittyFrame {
+        data: Vec<u8>,
+        index: usize,
+        kitty_id: u32,
+    },
     Failed(String),
     Cancelled,
 }
@@ -101,13 +107,12 @@ impl Animation {
         0
     }
 }
-fn encode(
+fn image_layout(
     picker: &Picker,
     key: &ImageKey,
-    image: image::DynamicImage,
-    kitty_id: u32,
+    image: &image::DynamicImage,
     source_dimensions: (u32, u32),
-) -> Result<SlicedProtocol> {
+) -> (ratatui::layout::Size, Resize) {
     let font = picker.font_size();
     let pixels = f64::from(key.width)
         * f64::from(key.height)
@@ -118,8 +123,6 @@ fn encode(
         (f64::from(key.width) * scale).floor().max(1.0) as u16,
         (f64::from(key.height) * scale).floor().max(1.0) as u16,
     );
-    // Layout already caps inline images at their original pixel size. Decoded
-    // animation frames may be smaller to meet the memory budget.
     let resize = if key.upscale
         || image.width() < source_dimensions.0
         || image.height() < source_dimensions.1
@@ -128,10 +131,20 @@ fn encode(
     } else {
         Resize::Fit(None)
     };
-    // Each prepared frame owns its image ID. Retire it only after its replacement is drawn.
+    (size, resize)
+}
+
+fn encode(
+    picker: &Picker,
+    key: &ImageKey,
+    image: image::DynamicImage,
+    kitty_id: u32,
+    source_dimensions: (u32, u32),
+) -> Result<SlicedProtocol> {
+    let (size, resize) = image_layout(picker, key, &image, source_dimensions);
     if picker.protocol_type() == ProtocolType::Kitty {
-        let actual = resize.size_for(&image, font, size);
-        let image = resize.resize(&image, font, actual, None);
+        let actual = resize.size_for(&image, picker.font_size(), size);
+        let image = resize.resize(&image, picker.font_size(), actual, None);
         return Ok(SlicedProtocol::Kitty(
             ratatui_image::protocol::kitty::Kitty::new(
                 image,
@@ -148,6 +161,45 @@ fn encode(
         picker, image, size, resize,
     )?)
 }
+
+fn kitty_frame(
+    picker: &Picker,
+    key: &ImageKey,
+    image: &image::DynamicImage,
+    kitty_id: u32,
+    source_dimensions: (u32, u32),
+) -> Result<Vec<u8>> {
+    let (size, resize) = image_layout(picker, key, image, source_dimensions);
+    let actual = resize.size_for(image, picker.font_size(), size);
+    let image = resize.resize(image, picker.font_size(), actual, None);
+    let mut png = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut png, image::ImageFormat::Png)?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(png.into_inner());
+    let (start, escape, end) =
+        ratatui_image::picker::cap_parser::Parser::tmux_start_escape_end(picker.tmux_detected());
+    let mut output = Vec::new();
+    let chunks = encoded.as_bytes().chunks(4096);
+    let count = chunks.len();
+    for (index, chunk) in chunks.enumerate() {
+        let more = u8::from(index + 1 < count);
+        if index == 0 {
+            write!(
+                output,
+                "{start}{escape}_Ga=f,f=100,i={kitty_id},r=1,q=2,m={more};"
+            )?;
+        } else {
+            write!(output, "{start}{escape}_Ga=f,q=2,m={more};")?;
+        }
+        output.extend_from_slice(chunk);
+        write!(output, "{escape}\\{end}")?;
+    }
+    write!(
+        output,
+        "{start}{escape}_Ga=a,i={kitty_id},c=1,q=2{escape}\\{end}"
+    )?;
+    Ok(output)
+}
+
 fn check_animation_canvas(dimensions: (u32, u32)) -> Result<()> {
     if u64::from(dimensions.0) * u64::from(dimensions.1) * 4 > 32 * 1024 * 1024 {
         bail!("动态图画布超过 32 MiB");
@@ -241,6 +293,7 @@ pub struct Media {
     pub clear_required: bool,
     generation: u64,
     retired: Vec<u32>,
+    terminal_output: Vec<u8>,
     next_image_id: u32,
     clock: u64,
     pub owned_cache: Option<std::path::PathBuf>,
@@ -267,6 +320,7 @@ impl Media {
             dimensions: HashMap::new(),
             deferred: HashSet::new(),
             retired: Vec::new(),
+            terminal_output: Vec::new(),
             next_image_id: u32::from_le_bytes(
                 uuid::Uuid::new_v4().as_bytes()[..4].try_into().unwrap(),
             ),
@@ -344,7 +398,15 @@ impl Media {
             }
             let frames = animation.frames.clone();
             let dimensions = self.entries[key].dimensions;
-            let kitty_id = self.allocate_image_id();
+            let direct = self.picker.protocol_type() == ProtocolType::Kitty;
+            if direct && !self.entries[key].displayed {
+                continue;
+            }
+            let kitty_id = if direct {
+                self.entries[key].kitty_id
+            } else {
+                self.allocate_image_id()
+            };
             self.pending.insert(key.clone(), kitty_id);
             let key = key.clone();
             let picker = self.picker.clone();
@@ -361,21 +423,31 @@ impl Media {
                 } else {
                     let job_key = key.clone();
                     match tokio::task::spawn_blocking(move || {
-                        encode(
-                            &picker,
-                            &job_key,
-                            frames[index].0.clone(),
-                            kitty_id,
-                            dimensions,
-                        )
+                        if direct {
+                            kitty_frame(&picker, &job_key, &frames[index].0, kitty_id, dimensions)
+                                .map(|data| ImageOutcome::KittyFrame {
+                                    data,
+                                    index,
+                                    kitty_id,
+                                })
+                        } else {
+                            encode(
+                                &picker,
+                                &job_key,
+                                frames[index].0.clone(),
+                                kitty_id,
+                                dimensions,
+                            )
+                            .map(|protocol| ImageOutcome::Frame {
+                                protocol,
+                                index,
+                                kitty_id,
+                            })
+                        }
                     })
                     .await
                     {
-                        Ok(Ok(protocol)) => ImageOutcome::Frame {
-                            protocol,
-                            index,
-                            kitty_id,
-                        },
+                        Ok(Ok(outcome)) => outcome,
                         Ok(Err(e)) => ImageOutcome::Failed(e.to_string()),
                         Err(e) => ImageOutcome::Failed(e.to_string()),
                     }
@@ -497,13 +569,14 @@ impl Media {
                 .await;
         });
     }
-    pub fn complete(&mut self, result: ImageResult) {
+    /// Returns pixel-only terminal output that does not require a UI redraw.
+    pub fn complete(&mut self, result: ImageResult) -> bool {
         if result.generation != self.generation {
-            return;
+            return false;
         }
         self.pending.remove(&result.key);
         if !self.visible.borrow().contains(&result.key) {
-            return;
+            return false;
         }
         match result.outcome {
             ImageOutcome::Ready(image) => {
@@ -525,7 +598,7 @@ impl Media {
                         .map(|(k, _)| k.clone());
                     let Some(victim) = victim else {
                         self.deferred.insert(result.key);
-                        return;
+                        return true;
                     };
                     if let Some(old) = self.entries.remove(&victim)
                         && old.displayed
@@ -552,6 +625,21 @@ impl Media {
                     animation.index = index;
                 }
             }
+            ImageOutcome::KittyFrame {
+                data,
+                index,
+                kitty_id,
+            } => {
+                if let Some(image) = self.entries.get_mut(&result.key)
+                    && image.kitty_id == kitty_id
+                    && image.displayed
+                    && let Some(animation) = &mut image.animation
+                {
+                    animation.index = index;
+                    self.terminal_output.extend(data);
+                    return false;
+                }
+            }
             ImageOutcome::Failed(error) => {
                 if let Some(image) = self.entries.get_mut(&result.key) {
                     image.animation = None;
@@ -565,24 +653,30 @@ impl Media {
             }
             ImageOutcome::Cancelled => {}
         }
+        true
+    }
+    pub fn has_terminal_output(&self) -> bool {
+        !self.terminal_output.is_empty()
     }
     pub fn flush_retired(&mut self) {
-        if self.retired.is_empty() {
+        if self.picker.protocol_type() != ProtocolType::Kitty {
+            self.terminal_output.clear();
+            self.retired.clear();
             return;
         }
-        if self.picker.protocol_type() == ProtocolType::Kitty {
-            let (start, escape, end) =
-                ratatui_image::picker::cap_parser::Parser::tmux_start_escape_end(
-                    self.picker.tmux_detected(),
-                );
-            let mut out = std::io::stdout().lock();
-            for id in self.retired.drain(..) {
-                let _ = write!(out, "{start}{escape}_Ga=d,d=I,i={id},q=2{escape}\\{end}");
-            }
-            let _ = out.flush();
-        } else {
-            self.retired.clear();
+        if self.terminal_output.is_empty() && self.retired.is_empty() {
+            return;
         }
+        let (start, escape, end) = ratatui_image::picker::cap_parser::Parser::tmux_start_escape_end(
+            self.picker.tmux_detected(),
+        );
+        let mut out = std::io::stdout().lock();
+        let _ = out.write_all(&self.terminal_output);
+        self.terminal_output.clear();
+        for id in self.retired.drain(..) {
+            let _ = write!(out, "{start}{escape}_Ga=d,d=I,i={id},q=2{escape}\\{end}");
+        }
+        let _ = out.flush();
     }
     pub fn clear_graphics(&mut self) {
         self.retired.extend(
@@ -1008,7 +1102,18 @@ mod animation_tests {
         for color in [[255, 0, 0, 255], [0, 255, 0, 255]] {
             encoder
                 .encode_frame(Frame::from_parts(
-                    RgbaImage::from_pixel(2, 2, Rgba(color)),
+                    RgbaImage::from_fn(64, 64, |x, y| {
+                        if x == 0 && y == 0 {
+                            Rgba(color)
+                        } else {
+                            Rgba([
+                                ((x * 17 + y * 31) % 255) as u8,
+                                ((x * 7 + y * 13) % 255) as u8,
+                                color[2],
+                                255,
+                            ])
+                        }
+                    }),
                     0,
                     0,
                     Delay::from_numer_denom_ms(100, 1),
@@ -1051,11 +1156,32 @@ mod animation_tests {
             .unwrap()
             .unwrap();
         media.complete(result);
+        let update = String::from_utf8(media.terminal_output.clone()).unwrap();
         let second = render(&mut media);
         assert_ne!(first, second);
         assert!(first.contains(&format!("i={id},")));
-        assert_ne!(media.entries[&key].kitty_id, id);
-        assert_eq!(media.retired, vec![id]);
+        assert!(update.starts_with(&format!("\x1b_Ga=f,f=100,i={id},r=1,")));
+        assert!(
+            update.matches("_Ga=f").count() > 1,
+            "large frame must exercise Kitty continuation chunks"
+        );
+        assert!(
+            !update.contains("\x1b["),
+            "Pixel updates must not move or hide the text cursor"
+        );
+        let payload = update
+            .split("\x1b\\")
+            .filter_map(|part| part.split_once(';'))
+            .filter(|(header, _)| header.contains("_Ga=f"))
+            .map(|(_, payload)| payload)
+            .collect::<String>();
+        let png = base64::engine::general_purpose::STANDARD
+            .decode(payload)
+            .unwrap();
+        let frame = image::load_from_memory(&png).unwrap().to_rgba8();
+        assert!(!frame.is_empty());
+        assert_eq!(media.entries[&key].kitty_id, id);
+        assert!(media.retired.is_empty());
         assert_eq!(media.entries[&key].animation.as_ref().unwrap().index, 1);
         media.set_visible([]);
         media.advance(started + Duration::from_millis(250));

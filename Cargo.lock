@@ -2459,6 +2459,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "axum",
+ "base64",
  "cc",
  "chrono",
  "clap",

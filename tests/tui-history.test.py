@@ -7,6 +7,7 @@ Usage: python3 tests/tui-history.test.py [--binary /path/to/qqtui]
 import argparse
 import base64
 import json
+import re
 import shlex
 import struct
 import zlib
@@ -716,6 +717,19 @@ def main():
                 print("Animation screenshot colors:",colors, sorted(shot.convert("RGB").getcolors(shot.width*shot.height),reverse=True)[:10],flush=True)
                 return False
             assert animation_plays(), "Inline GIF did not display both frames in Kitty"
+            keys("i")
+            time.sleep(0.2)
+            def input_cursor():
+                text = subprocess.run([*remote, "get-text", "--add-cursor"], capture_output=True, text=True, check=True).stdout
+                assert "\x1b[?25h" in text, "Animation hid the input cursor"
+                return re.findall(r"\x1b\[([0-9]+);([0-9]+)H", text)[-1]
+            cursor = input_cursor()
+            for _ in range(25):
+                assert input_cursor() == cursor, "Animation moved the input cursor"
+                time.sleep(0.03)
+            assert animation_plays(), "GIF stopped while editing text"
+            keys("escape")
+            print("Kitty: GIF pixel updates keep the input cursor visible and stationary", flush=True)
             keys("v")
             wait_for(lambda: "Esc 关闭" in screen())
             assert animation_plays(), "Preview GIF did not display both frames in Kitty"
