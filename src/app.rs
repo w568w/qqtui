@@ -1403,6 +1403,9 @@ impl App {
             }
             TerminalEvent::FocusLost => {
                 self.terminal_focused = false;
+                if let Some(chat) = self.chat_mut() {
+                    chat.viewport.follow = false;
+                }
                 vec![]
             }
             TerminalEvent::Mouse(m) => {
@@ -6515,6 +6518,7 @@ mod tests {
     #[test]
     fn reaching_latest_bottom_resumes_follow_and_hints_belong_to_message_focus() {
         let mut app = App::new(Config::default());
+        app.terminal_focused = true;
         app.selected_peer = Some(peer("self"));
         let mut chat = Chat {
             loaded: true,
@@ -6579,6 +6583,57 @@ mod tests {
         );
         assert_eq!(chat.new_messages, 0);
         assert!(screen(&terminal).contains("new-at-bottom"));
+
+        app.focus = Focus::Conversations;
+        let mut draw = |app: &mut App| {
+            terminal
+                .draw(|frame| {
+                    crate::ui::draw(frame, app, &mut media);
+                })
+                .unwrap();
+        };
+        app.terminal(TerminalEvent::FocusLost);
+        draw(&mut app);
+        assert!(!app.chat().unwrap().viewport.follow);
+        app.terminal(TerminalEvent::FocusGained);
+        draw(&mut app);
+        assert!(app.chat().unwrap().viewport.follow);
+
+        let start = app.chat().unwrap().view_start;
+        let anchor = app.chat().unwrap().viewport.anchor.clone();
+        let selected = app.chat().unwrap().selected.clone();
+        app.terminal(TerminalEvent::FocusLost);
+        app.chat_mut().unwrap().receive(vec![msg("42", "42")]);
+        draw(&mut app);
+        let chat = app.chat().unwrap();
+        assert!(!chat.viewport.follow);
+        assert_eq!(chat.view_start, start);
+        assert_eq!(chat.viewport.anchor, anchor);
+        assert_eq!(chat.selected, selected);
+        assert_eq!(chat.new_messages, 1);
+        app.terminal(TerminalEvent::FocusGained);
+        draw(&mut app);
+        assert!(!app.chat().unwrap().viewport.follow);
+        assert_eq!(app.chat().unwrap().view_start, start);
+        assert_eq!(app.chat().unwrap().new_messages, 1);
+
+        app.focus = Focus::Messages;
+        app.terminal(TerminalEvent::Key(KeyEvent::new(
+            KeyCode::Char('G'),
+            KeyModifiers::SHIFT,
+        )));
+        draw(&mut app);
+        assert!(app.chat().unwrap().viewport.follow);
+        assert_eq!(app.chat().unwrap().new_messages, 0);
+
+        app.chat_mut().unwrap().scroll_lines(-5);
+        draw(&mut app);
+        let start = app.chat().unwrap().view_start;
+        app.terminal(TerminalEvent::FocusLost);
+        app.terminal(TerminalEvent::FocusGained);
+        draw(&mut app);
+        assert!(!app.chat().unwrap().viewport.follow);
+        assert_eq!(app.chat().unwrap().view_start, start);
     }
     #[test]
     fn unresolved_jump_anchor_is_not_replaced_by_old_bottom_rows() {
@@ -7460,6 +7515,7 @@ mod tests {
     #[test]
     fn visible_new_messages_clear_without_g_and_visuals_have_no_filename_labels() {
         let mut app = App::new(Config::default());
+        app.terminal_focused = true;
         app.account = "a".into();
         app.selected_peer = Some(peer("self"));
         let mut chat = Chat {

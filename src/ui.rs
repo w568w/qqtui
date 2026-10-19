@@ -496,6 +496,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, media: &mut Media) -> DrawWork {
     let bottom_binding = app.binding("bottom");
     let open_binding = app.binding("open");
     let mode = app.mode;
+    let terminal_focused = app.terminal_focused;
     let modal_open = app.modal.is_open() && !details_sidebar;
     let pending: Vec<_> = app
         .receipts
@@ -769,7 +770,8 @@ pub fn draw(frame: &mut Frame, app: &mut App, media: &mut Media) -> DrawWork {
                     .anchor
                     .as_ref()
                     .is_none_or(|anchor| chat.rows.iter().any(|(id, _, _)| id == anchor)));
-        if chat.loaded
+        if terminal_focused
+            && chat.loaded
             && viewport_ready
             && !chat.has_later
             && chat.view_height > 0
@@ -790,7 +792,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, media: &mut Media) -> DrawWork {
             && chat.view_height > 0
             && !chat.rows.is_empty()
             && start == max_start;
-        if work.readable && !chat.has_later && chat.new_messages > 0 {
+        if terminal_focused && work.readable && !chat.has_later && chat.new_messages > 0 {
             chat.new_messages = 0;
             work.redraw = true;
         }
