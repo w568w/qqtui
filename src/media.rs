@@ -208,6 +208,8 @@ fn check_animation_canvas(dimensions: (u32, u32)) -> Result<()> {
 }
 fn decode(path: &str, frame_budget: usize) -> Result<Vec<(image::DynamicImage, Duration)>> {
     use image::{AnimationDecoder, ImageDecoder, ImageFormat};
+    // thumbnail() upscales to fill the box; only oversized frames are shrunk.
+    let shrink = |i: &image::DynamicImage, e: u32| if i.width().max(i.height()) > e { i.thumbnail(e, e) } else { i.clone() };
     let mut reader = image::ImageReader::open(path)?.with_guessed_format()?;
     let mut limits = image::Limits::default();
     limits.max_alloc = Some(32 * 1024 * 1024);
@@ -245,10 +247,7 @@ fn decode(path: &str, frame_budget: usize) -> Result<Vec<(image::DynamicImage, D
         _ => None,
     };
     let Some(frames) = frames else {
-        return Ok(vec![(
-            reader.decode()?.thumbnail(1024, 1024),
-            Duration::ZERO,
-        )]);
+        return Ok(vec![(shrink(&reader.decode()?, 1024), Duration::ZERO)]);
     };
     let mut images: Vec<(image::DynamicImage, Duration)> = Vec::new();
     let mut edge = 512;
@@ -264,14 +263,14 @@ fn decode(path: &str, frame_budget: usize) -> Result<Vec<(image::DynamicImage, D
         } else {
             delay
         };
-        let mut image = image::DynamicImage::ImageRgba8(frame.into_buffer()).thumbnail(edge, edge);
+        let mut image = shrink(&image::DynamicImage::ImageRgba8(frame.into_buffer()), edge);
         while bytes + image.as_bytes().len() > frame_budget && edge > 1 {
             edge = (edge / 2).max(1);
             for (old, _) in &mut images {
-                *old = old.thumbnail(edge, edge);
+                *old = shrink(old, edge);
             }
             bytes = images.iter().map(|(old, _)| old.as_bytes().len()).sum();
-            image = image.thumbnail(edge, edge);
+            image = shrink(&image, edge);
         }
         bytes += image.as_bytes().len();
         images.push((image, delay));
@@ -1092,6 +1091,34 @@ mod animation_tests {
             assert_eq!(frames[1].1, Duration::from_millis(100));
         }
     }
+    #[test]
+    fn small_animation_frames_keep_native_size_instead_of_upscaling() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("small.gif");
+        let mut encoder = GifEncoder::new(std::fs::File::create(&path).unwrap());
+        for _ in 0..2 {
+            encoder
+                .encode_frame(Frame::from_parts(
+                    RgbaImage::from_pixel(64, 48, Rgba([1, 2, 3, 255])),
+                    0,
+                    0,
+                    Delay::from_numer_denom_ms(100, 1),
+                ))
+                .unwrap();
+        }
+        drop(encoder);
+        let frames = decode(path.to_str().unwrap(), 8 * 1024 * 1024).unwrap();
+        assert_eq!(frames.len(), 2);
+        assert_eq!((frames[0].0.width(), frames[0].0.height()), (64, 48));
+
+        let large = temp.path().join("large.png");
+        RgbaImage::from_pixel(2000, 1000, Rgba([1, 2, 3, 255]))
+            .save(&large)
+            .unwrap();
+        let frames = decode(large.to_str().unwrap(), 8 * 1024 * 1024).unwrap();
+        assert_eq!((frames[0].0.width(), frames[0].0.height()), (1024, 512));
+    }
+
     #[tokio::test]
     async fn animated_frames_loop_only_when_visible_and_survive_no_stale_resize_result() {
         let temp = tempfile::tempdir().unwrap();
