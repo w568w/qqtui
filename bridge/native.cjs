@@ -706,9 +706,23 @@ class NativeBridge {
       onUnreadCntUpdate: invalidate,
       onKickedOffLine: (info) => {
         this.phase = "offline";
-        this.errors.push(
-          cleanText(info.tipsDesc || info.tipsTitle || "QQ session is offline"),
+        const reason = cleanText(
+          info.tipsDesc || info.tipsTitle || "QQ session is offline",
         );
+        console.error(
+          "[qqtui] kicked offline:",
+          json({
+            title: cleanText(info.tipsTitle || ""),
+            desc: cleanText(info.tipsDesc || ""),
+            kicker: cleanText(
+              info.kickerName || info.kickerNick || info.kickerUin || "",
+            ),
+            device: cleanText(
+              info.kickerTermType || info.kickerDeviceName || "",
+            ),
+          }).slice(0, 1024),
+        );
+        this.errors.push(reason);
         this.errors = this.errors.slice(-5);
         this.event("status", { status: this.status() });
       },
@@ -773,6 +787,11 @@ class NativeBridge {
             : info.status === 20
               ? "offline"
               : "ready";
+          console.log(
+            "[qqtui] self status:",
+            info.status,
+            cleanText(info.statusText || info.extStatus || "").slice(0, 256),
+          );
           if (this.phase !== phase) {
             this.phase = phase;
             this.event("status", { status: this.status() });
