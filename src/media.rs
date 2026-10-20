@@ -185,7 +185,7 @@ fn kitty_frame(
         if index == 0 {
             write!(
                 output,
-                "{start}{escape}_Ga=f,f=100,i={kitty_id},r=1,q=2,m={more};"
+                "{start}{escape}_Ga=f,f=100,i={kitty_id},r=1,X=1,q=2,m={more};"
             )?;
         } else {
             write!(output, "{start}{escape}_Ga=f,q=2,m={more};")?;
@@ -1160,7 +1160,10 @@ mod animation_tests {
         let second = render(&mut media);
         assert_ne!(first, second);
         assert!(first.contains(&format!("i={id},")));
-        assert!(update.starts_with(&format!("\x1b_Ga=f,f=100,i={id},r=1,")));
+        assert!(
+            update.starts_with(&format!("\x1b_Ga=f,f=100,i={id},r=1,X=1,")),
+            "frame edits must replace pixels, not alpha blend over the previous frame"
+        );
         assert!(
             update.matches("_Ga=f").count() > 1,
             "large frame must exercise Kitty continuation chunks"
