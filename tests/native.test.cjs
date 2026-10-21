@@ -444,7 +444,7 @@ test('account instances reuse native data and reject duplicate account sessions 
   t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
   const root=path.join(dir,'original QQ');fs.mkdirSync(root);
   const db=path.join(root,'existing.db');fs.writeFileSync(db,'existing chat data');
-  const make=account=>{const paths={userData:root};return new AccountSession({getPath:key=>paths[key],setPath:(key,value)=>{paths[key]=value;}},{account,profile:path.join(dir,'profiles',account),leaseDir:path.join(dir,'leases')});};
+  const make=account=>{const paths={userData:root};const session=new AccountSession({getPath:key=>paths[key],setPath:(key,value)=>{paths[key]=value;}},{account,profile:path.join(dir,'profiles',account),leaseDir:path.join(dir,'leases')});assert.equal(paths.appData,session.profile);return session;};
   const one=make('123'),two=make('456'),duplicate=make('123');
   const config=id=>({selfUin:id,desktopPathConfig:{account_path:path.join(dir,'temporary'),other:7},secret:'unchanged'});
   assert.notEqual(one.engine({global_path_config:{}}).global_path_config.desktopGlobalPath,two.login({}).commonPath);

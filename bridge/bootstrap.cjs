@@ -1,9 +1,27 @@
 "use strict";
 const fs = require("node:fs");
+const logger = new (require("node:console").Console)(process.stdout, process.stderr);
 const crypto = require("node:crypto");
 const { NativeBridge } = require("./native.cjs");
 const electron = require("electron");
 const app = electron.app;
+if (electron.crashReporter) {
+  const start = electron.crashReporter.start;
+  electron.crashReporter.start = options =>
+    start.call(electron.crashReporter, { ...options, uploadToServer: false });
+}
+const relaunch = app.relaunch;
+app.relaunch = function (...args) {
+  if (process.env.QQTUI_CONTROL_FD) {
+    const options = args[0] || {};
+    fs.writeSync(Number(process.env.QQTUI_CONTROL_FD), JSON.stringify({
+      program: options.execPath || process.execPath,
+      args: options.args || (options.execPath ? [] : process.argv.slice(1)),
+    }));
+    return true;
+  }
+  return relaunch.apply(this, args);
+};
 const desktop = new (require("./desktop.cjs").Desktop)(electron);
 const handleBrokenPipe = () => {};
 const { AccountSession } = require("./accounts.cjs");
@@ -26,6 +44,21 @@ const bridge = new NativeBridge(process.env.QQTUI_SOCKET, {
 });
 
 bridge.listen();
+const initializeAccount = (initialize) => {
+  try {
+    return initialize();
+  } catch (error) {
+    bridge.phase = "incompatible";
+    bridge.errors.push(error.message);
+    logger.error("[qqtui] account:", error);
+    // QQ can include initialization errors in remote reports.
+    throw Object.assign(new Error("QQ account setup failed"), { stack: undefined });
+  }
+};
+app.once("quit", () => {
+  accounts.close();
+  bridge.server.close();
+});
 
 const originalDlopen = process.dlopen;
 let captured = false;
@@ -60,7 +93,7 @@ process.dlopen = function (module, filename, ...args) {
   }
   const wrapper = module.exports;
   bridge.phase = "login";
-  console.log("[qqtui] captured QQ wrapper");
+  logger.log("[qqtui] captured QQ wrapper");
   const wrapSession = (session) =>
     new Proxy(
       {},
@@ -69,22 +102,15 @@ process.dlopen = function (module, filename, ...args) {
           const value = session[key];
           if (key !== "init")
             return typeof value === "function" ? value.bind(session) : value;
-          return (...params) => {
-            try {
-              params[0] = accounts.prepare(params[0]);
-            } catch (error) {
-              bridge.phase = "incompatible";
-              bridge.errors.push(error.message);
-              console.error("[qqtui] account:", error.message);
-              throw error;
-            }
+          return (...params) => initializeAccount(() => {
+            params[0] = accounts.prepare(params[0]);
             bridge.attach(session, wrapper, null);
             bridge.sessionConfig = params[0];
             const callbacks = params[3];
             const original = callbacks.onOpentelemetryInit;
             callbacks.onOpentelemetryInit = function (...values) {
-              const result = original?.apply(this, values);
-              console.log("[qqtui] session initialized", values[0]?.is_init);
+              const result = initializeAccount(() => original?.apply(this, values));
+              logger.log("[qqtui] session initialized", values[0]?.is_init);
               if (values[0]?.is_init)
                 setImmediate(() => {
                   try {
@@ -99,13 +125,13 @@ process.dlopen = function (module, filename, ...args) {
                   } catch (e) {
                     bridge.phase = "incompatible";
                     bridge.errors.push(e.message);
-                    console.error("[qqtui] initialization:", e.message);
+                    logger.error("[qqtui] initialization:", e.message);
                   }
                 });
               return result;
             };
             return session.init(...params);
-          };
+          });
         },
       },
     );
@@ -143,13 +169,13 @@ process.dlopen = function (module, filename, ...args) {
                             ? fn.bind(instance)
                             : fn;
                         return (config, ...rest) =>
-                          fn.call(
+                          initializeAccount(() => fn.call(
                             instance,
                             key === "NodeIQQNTWrapperEngine"
                               ? accounts.engine(config)
                               : accounts.login(config),
                             ...rest,
-                          );
+                          ));
                       },
                     },
                   );
@@ -183,4 +209,6 @@ const originalMain = process.env.QQTUI_ORIGINAL_MAIN;
 if (!originalMain || !fs.existsSync(originalMain.split(".asar/")[0])) {
   throw new Error("QQ original application entry is missing");
 }
+delete process.env.QQTUI_PACKAGE;
+delete process.env.QQTUI_MANIFEST;
 require(originalMain);

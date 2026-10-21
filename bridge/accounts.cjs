@@ -17,6 +17,7 @@ class AccountSession {
       if (!path.isAbsolute(options.profile))
         throw new Error("Absolute QQ profile required");
       fs.mkdirSync(options.profile, { recursive: true, mode: 0o700 });
+      app.setPath("appData", options.profile);
       app.setPath("userData", options.profile);
       app.setPath("sessionData", options.profile);
     }

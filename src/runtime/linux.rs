@@ -410,15 +410,26 @@ pub async fn host(paths: &Paths) -> Result<()> {
             .open(paths.state.join("host.log"))?;
         let lease_dir = paths.shared_state.join("account-leases");
         clean_account_leases(&lease_dir)?;
-        let mut qq = Command::new(&config.qq_path);
-        qq.env("QQTUI_LEASE_DIR", lease_dir);
-        if let Some(account) = &paths.account {
-            qq.env("QQTUI_ACCOUNT", account)
-                .env("QQTUI_PROFILE_DIR", paths.state.join("qq-profile"));
-        }
-        children.0.push((
-            "QQ",
-            qq.arg("--ozone-platform=x11")
+        let (control, child_control) = tokio::net::UnixDatagram::pair()?;
+        let control_fd = child_control.as_raw_fd();
+        let spawn_qq = |program: &Path, args: &[String]| -> Result<Child> {
+            let mut qq = Command::new(program);
+            qq.env("QQTUI_LEASE_DIR", &lease_dir)
+                .env("QQTUI_CONTROL_FD", control_fd.to_string());
+            if let Some(account) = &paths.account {
+                qq.env("QQTUI_ACCOUNT", account)
+                    .env("QQTUI_PROFILE_DIR", paths.state.join("qq-profile"));
+            }
+            // Only this private control socket is inherited across exec.
+            unsafe {
+                qq.pre_exec(move || {
+                    if nix::libc::fcntl(control_fd, nix::libc::F_SETFD, 0) == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+            Ok(qq.args(args)
                 .env("DISPLAY", &display)
                 .env("XAUTHORITY", &authority)
                 .env("QT_QPA_PLATFORM", "xcb")
@@ -431,24 +442,45 @@ pub async fn host(paths: &Paths) -> Result<()> {
                 .env_remove("XDG_ACTIVATION_TOKEN")
                 .env_remove("DESKTOP_STARTUP_ID")
                 .env("LD_PRELOAD", &preload)
+                .env("LD_AUDIT", &preload)
                 .env("QQTUI_PACKAGE", app.join("package.json"))
-                .env("QQTUI_MANIFEST", manifest)
-                .env("QQTUI_ORIGINAL_MAIN", original_main)
+                .env("QQTUI_MANIFEST", &manifest)
+                .env("QQTUI_ORIGINAL_MAIN", &original_main)
                 .env("QQTUI_SOCKET", paths.socket())
                 .env("QQTUI_STATE_DIR", &paths.state)
                 .env("QQTUI_CACHE_DIR", &paths.cache)
                 .stdout(Stdio::from(log.try_clone()?))
-                .stderr(Stdio::from(log))
+                .stderr(Stdio::from(log.try_clone()?))
                 .kill_on_drop(true)
-                .spawn()?,
-        ));
+                .spawn()?)
+        };
+        children.0.push(("QQ", spawn_qq(&config.qq_path, &["--ozone-platform=x11".into()])?));
         let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
         let exit = 'supervise: loop {
             tokio::select! {
                 _=terminate.recv()=>break None,
                 _=tokio::signal::ctrl_c()=>break None,
                 _=tokio::time::sleep(Duration::from_millis(100))=>{
-                    for (name,child) in &mut children.0 {if let Some(status)=child.try_wait()?{break 'supervise Some((*name,status));}}
+                    for (name,child) in &mut children.0 {if let Some(status)=child.try_wait()?{
+                        if *name == "QQ" {
+                            #[derive(serde::Deserialize)]
+                            struct Relaunch { program: PathBuf, args: Vec<String> }
+                            let mut buffer = [0; 65536];
+                            let mut relaunch = None;
+                            while let Ok(size) = control.try_recv(&mut buffer) {
+                                relaunch = Some(serde_json::from_slice::<Relaunch>(&buffer[..size])?);
+                            }
+                            if let Some(request) = relaunch {
+                                clean_account_leases(&lease_dir)?;
+                                if paths.socket().exists() { fs::remove_file(paths.socket())?; }
+                                *child = spawn_qq(&request.program, &request.args)?;
+                                eprintln!("QQ 请求重启，已启动新的受管理进程");
+                                continue;
+                            }
+                        }
+                        eprintln!("QQ 宿主组件 {name} 退出（{status}）");
+                        break 'supervise Some((*name,status));
+                    }}
                 }
             }
         };

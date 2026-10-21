@@ -1,6 +1,7 @@
 "use strict";
 const net = require("node:net");
 const fs = require("node:fs");
+const logger = new (require("node:console").Console)(process.stdout, process.stderr);
 const fsp = fs.promises;
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -397,7 +398,7 @@ class NativeBridge {
       });
     });
     this.server.on("error", (e) => {
-      console.error("[qqtui] bridge:", e.message);
+      logger.error("[qqtui] bridge:", e.message);
     });
     this.server.listen(this.socketPath, () => {
       if (process.platform !== "win32") fs.chmodSync(this.socketPath, 0o600);
@@ -472,7 +473,7 @@ class NativeBridge {
     this.recent = this.session.getRecentContactService();
     this.subscribe();
     this.event("status", { status: this.status() });
-    console.log("[qqtui] native session ready");
+    logger.log("[qqtui] native session ready");
   }
   status() {
     const capabilities =
@@ -592,7 +593,7 @@ class NativeBridge {
               } catch (e) {
                 this.errors.push(cleanText(e.message));
                 this.errors = this.errors.slice(-5);
-                console.error("[qqtui] callback:", cleanText(e.message));
+                logger.error("[qqtui] callback:", cleanText(e.message));
               }
             },
           ]),
@@ -709,17 +710,16 @@ class NativeBridge {
         const reason = cleanText(
           info.tipsDesc || info.tipsTitle || "QQ session is offline",
         );
-        console.error(
-          "[qqtui] kicked offline:",
+        logger.error(
+          `${new Date().toISOString()} ${process.pid} [qqtui] kicked offline:`,
           json({
             title: cleanText(info.tipsTitle || ""),
             desc: cleanText(info.tipsDesc || ""),
-            kicker: cleanText(
-              info.kickerName || info.kickerNick || info.kickerUin || "",
-            ),
-            device: cleanText(
-              info.kickerTermType || info.kickerDeviceName || "",
-            ),
+            appId: info.appId,
+            instanceId: info.instanceId,
+            sameDevice: info.sameDevice,
+            kickedType: info.kickedType,
+            securityKickedType: info.securityKickedType,
           }).slice(0, 1024),
         );
         this.errors.push(reason);
@@ -787,10 +787,15 @@ class NativeBridge {
             : info.status === 20
               ? "offline"
               : "ready";
-          console.log(
-            "[qqtui] self status:",
-            info.status,
-            cleanText(info.statusText || info.extStatus || "").slice(0, 256),
+          logger.log(
+            `${new Date().toISOString()} ${process.pid} [qqtui] self status:`,
+            json({
+              status: info.status,
+              extStatus: info.extStatus,
+              offlineType: info.offlineType,
+              termType: info.termType,
+              netType: info.netType,
+            }),
           );
           if (this.phase !== phase) {
             this.phase = phase;
@@ -822,7 +827,7 @@ class NativeBridge {
       try {
         if (r.id !== undefined) r.service[r.remove](r.id);
       } catch (e) {
-        console.error("[qqtui] listener cleanup:", e.message);
+        logger.error("[qqtui] listener cleanup:", e.message);
       }
     }
     // A service returning void has no removable registration in upstream's
@@ -862,7 +867,7 @@ class NativeBridge {
               );
             })
             .catch((error) =>
-              console.error("[qqtui] receipt lookup:", error.message),
+              logger.error("[qqtui] receipt lookup:", error.message),
             );
         }
     }
@@ -915,7 +920,7 @@ class NativeBridge {
     if (complete.some(m => m.system_notice)) {
       this.normalizeMessages(raws.filter(raw => routable(raw) && Array.isArray(raw.elements)))
         .then(messages => this.event("notices.updated", { messages: messages.filter(m => m.system_notice) }))
-        .catch(error => console.error("[qqtui] notice names:", error.message));
+        .catch(error => logger.error("[qqtui] notice names:", error.message));
     }
     if (partial.length) this.event("reactions.updated", { messages: partial });
     if (complete.length + partial.length < messages.length)
@@ -1270,7 +1275,7 @@ class NativeBridge {
       const uids = [...new Set(categories.flatMap((c) => c.buddyUids))];
       const profiles = await this.session
         .getProfileService()
-        .getCoreAndBaseInfo("qqtui", uids);
+        .getCoreAndBaseInfo("nodeStore", uids);
       const friends = [...profiles].map(([uid, v]) => ({
         ...v.baseInfo,
         ...v.coreInfo,

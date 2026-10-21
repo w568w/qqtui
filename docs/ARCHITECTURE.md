@@ -4,7 +4,7 @@
 
 启动选择器只负责选择宿主实例，每个 TUI 窗口固定一个账号。原宿主保持原路径；新增宿主按 QQ 号隔离配置、状态、socket、Xvfb、私有 D-Bus 和 systemd 服务。显示编号分配在用户内串行化，防止并发启动抢占同一显示。
 
-QQ 的浏览器 userData/sessionData、原生引擎 desktopGlobalPath 和登录 commonPath 按实例管理；会话 desktopPathConfig.account_path 指向原始 QQ 数据根目录。初始化会话前校验预期 QQ 号并取得独占账号租约；退出释放自己持有的租约，宿主启动时清理已退出进程留下的租约。
+QQ 的应用配置 appData、浏览器 userData/sessionData、原生引擎 desktopGlobalPath 和登录 commonPath 按实例管理；会话 desktopPathConfig.account_path 指向原始 QQ 数据根目录。初始化会话前校验预期 QQ 号并取得独占账号租约；退出释放自己持有的租约，宿主启动时清理已退出进程留下的租约。
 
 完整 QQ 持有账号、设备信息、网络连接、消息同步和原生数据库。会话顺序、置顶、未读数由 RecentContactService 提供；消息操作调用 MsgService。好友、群和成员来自各自原生服务。
 
@@ -14,7 +14,9 @@ Rust app 统一应用状态变化；backend 管理请求关联和连接；store 
 
 ## 启动与退出
 
-宿主为 QQ 准备一个保留原始元数据的替代 package.json。进程内 loader 重定向指定文件的只读访问，随后加载本地桥接和 QQ 的原始 main。桥接文件通过原子替换更新，已运行宿主映射的 loader 文件保持原样。
+宿主为 QQ 准备一个保留原始元数据的替代 package.json。进程内 loader 重定向指定文件的只读访问以进入桥接；加载 QQ 原始 main 前关闭重定向，后续读取恢复为安装目录中的原始文件。桥接文件通过原子替换更新，已运行宿主映射的 loader 文件保持原样。
+
+同一 loader 通过 GNU 动态链接审计过滤桥接目录的脚本资源名，并限制原生 Bugly 报告器的网络连接；其他库的符号解析保持原样。Electron 崩溃报告关闭远程上传，保留本地诊断。消息签名、文件校验及原生业务上报继续执行。
 
 QQ 新版的原生方法有不可写、不可配置的属性。会话代理使用独立对象转发到真实对象，保持 native 调用的真实接收者，等待 QQ 自己初始化完成后取得服务。
 
