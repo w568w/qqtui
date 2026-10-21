@@ -209,7 +209,13 @@ fn check_animation_canvas(dimensions: (u32, u32)) -> Result<()> {
 fn decode(path: &str, frame_budget: usize) -> Result<Vec<(image::DynamicImage, Duration)>> {
     use image::{AnimationDecoder, ImageDecoder, ImageFormat};
     // thumbnail() upscales to fill the box; only oversized frames are shrunk.
-    let shrink = |i: &image::DynamicImage, e: u32| if i.width().max(i.height()) > e { i.thumbnail(e, e) } else { i.clone() };
+    let shrink = |i: &image::DynamicImage, e: u32| {
+        if i.width().max(i.height()) > e {
+            i.thumbnail(e, e)
+        } else {
+            i.clone()
+        }
+    };
     let mut reader = image::ImageReader::open(path)?.with_guessed_format()?;
     let mut limits = image::Limits::default();
     limits.max_alloc = Some(32 * 1024 * 1024);
