@@ -3128,7 +3128,9 @@ mod tests {
         ));
         app.key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE));
         app.key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::SHIFT));
-        assert_eq!(app.chat().unwrap().draft.text, "A");
+        app.key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::SHIFT));
+        app.key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::NONE));
+        assert_eq!(app.chat().unwrap().draft.text, "AVV");
     }
     #[tokio::test]
     async fn an_around_response_cannot_replace_a_newer_reading_position() {

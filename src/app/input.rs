@@ -239,7 +239,10 @@ impl App {
         if self.modal.is_open() {
             return self.modal_key(key);
         }
-        if key.code == KeyCode::Char('V') && self.binding("preview") == "v" {
+        if self.mode == Mode::Normal
+            && key.code == KeyCode::Char('V')
+            && self.binding("preview") == "v"
+        {
             key.code = KeyCode::Char('v');
             key.modifiers.remove(KeyModifiers::SHIFT);
         }
