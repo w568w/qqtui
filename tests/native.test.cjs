@@ -481,8 +481,14 @@ test('forwarded media lookup follows its record path and preserves native downlo
   await assert.rejects(b.call('media.resolve',{account:'123',peer,id:'12',element_id:'8'},{}),/unavailable/);
   await assert.rejects(b.call('media.resolve',{account:'123',peer,id:'12',element_id:'8',forward_path:['99']},{}),/unavailable/);
   fs.unlinkSync(file);
-  b.session.getRichMediaService=()=>({downloadRichMediaInVisit:args=>{assert.equal(args.chatType,2);assert.equal(args.peerUid,'789');assert.equal(args.elem,child.elements[0]);assert.equal(args.ele,undefined);assert.equal(args.triggerType,1);assert.equal(args.useHttps,true);fs.writeFileSync(file,'downloaded');b.mediaWaiters.get('12:8').finish(null,{filePath:file});}});
+  b.msg.downloadRichMedia=args=>{assert.equal(args.msgId,'10');assert.equal(args.elementId,'8');assert.equal(args.chatType,1);assert.equal(args.peerUid,'u_self');assert.equal(args.filePath,file);fs.writeFileSync(file,'downloaded');b.mediaWaiters.get('10:8').finish(null,{filePath:file});};
   assert.equal((await b.call('media.resolve',{account:'123',peer,id:'12',element_id:'8',forward_path:['10']},{})).path,file);
+  fs.unlinkSync(file);
+  b.msg.getMultiMsg=async(_peer,rootId,id)=>{
+    assert.equal(rootId,'10');
+    return {result:0,msgList:id==='10'?[{msgId:'11',elements:[{multiForwardMsgElement:{xmlContent:'<msg/>'}}]}]:[child]};
+  };
+  assert.equal((await b.call('media.resolve',{account:'123',peer,id:'12',element_id:'8',forward_path:['10','11']},{})).path,file);
 });
 
 test('gray tips use structured notice semantics and reaction targets resolve by native sequence',async t=>{
@@ -521,12 +527,13 @@ test('a stale forwarded image URL falls back to native download and creates its 
   b.msg.getMsgsByMsgId=async()=>({result:0,msgList:[root]});
   b.msg.getMultiMsg=async()=>({result:0,msgList:[child]});
   b.resources.image=async()=>{attempts++;throw new Error('HTTP 404');};
-  b.session.getRichMediaService=()=>({downloadRichMediaInVisit:args=>{
-    assert.equal(args.elem,child.elements[0]);
+  b.msg.downloadRichMedia=args=>{
+    assert.equal(args.msgId,'10');
+    assert.equal(args.elementId,'8');
     fs.writeFileSync(file,'native picture');
-    b.mediaWaiters.get('12:8').finish(null,{filePath:file});
+    b.mediaWaiters.get('10:8').finish(null,{filePath:file});
     return {result:0};
-  }});
+  };
   const result=await b.call('media.resolve',{account:'123',peer,id:'12',element_id:'8',forward_path:['10']},{});
   assert.equal(result.path,file);assert.equal(attempts,1);
 });

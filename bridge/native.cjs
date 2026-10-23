@@ -2049,8 +2049,10 @@ class NativeBridge {
       await fs.promises.mkdir(path.dirname(source), { recursive: true, mode: 0o700 });
       context.check();
     }
-    const key = `${p.id}:${p.element_id}`;
-    const identity = JSON.stringify([peer, p.forward_path || []]);
+    // QQ routes forwarded media through the outer card, not the inner record.
+    const downloadId = forwarded ? p.forward_path[0] : p.id;
+    const key = `${downloadId}:${p.element_id}`;
+    const identity = JSON.stringify([peer, p.forward_path || [], p.id]);
     let request = this.mediaWaiters.get(key);
     if (request && request.identity !== identity)
       throw new Error("Media identity is busy in another record");
@@ -2079,41 +2081,19 @@ class NativeBridge {
         e.picElement ? 90000 : 120000,
       );
       try {
-        let submitted;
-        if (forwarded) {
-          const rich = context.session.getRichMediaService();
-          if (typeof rich.downloadRichMediaInVisit !== "function")
-            throw new Error("QQ forwarded media download unavailable");
-          submitted = rich.downloadRichMediaInVisit({
-            downloadType: 1,
-            thumbSize: 0,
-            msgId: String(raw.msgId),
-            msgRandom: String(raw.msgRandom ?? "0"),
-            msgSeq: String(raw.msgSeq ?? "0"),
-            msgTime: String(raw.msgTime ?? "0"),
-            chatType: raw.chatType ?? peer.chatType,
-            senderUid: String(raw.senderUid ?? ""),
-            peerUid: String(raw.peerUid ?? peer.peerUid),
-            guildId: String(raw.guildId ?? ""),
-            elem: e,
-            useHttps: true,
-            triggerType: 1,
-          });
-        } else {
-          submitted = context.msg.downloadRichMedia({
-            fileModelId: "0",
-            downSourceType: 0,
-            downloadScene: 0,
-            triggerType: 1,
-            msgId: String(p.id),
-            chatType: peer.chatType,
-            peerUid: peer.peerUid,
-            elementId: String(p.element_id),
-            thumbSize: 0,
-            downloadType: 1,
-            filePath: source,
-          });
-        }
+        const submitted = context.msg.downloadRichMedia({
+          fileModelId: "0",
+          downSourceType: 0,
+          downloadScene: 0,
+          triggerType: 1,
+          msgId: String(downloadId),
+          chatType: peer.chatType,
+          peerUid: peer.peerUid,
+          elementId: String(p.element_id),
+          thumbSize: 0,
+          downloadType: 1,
+          filePath: source,
+        });
         Promise.resolve(submitted)
           .then(checked)
           .catch((error) => request.finish(error));
