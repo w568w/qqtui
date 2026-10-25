@@ -1056,10 +1056,14 @@ pub fn draw(frame: &mut Frame, app: &mut App, media: &mut Media) -> DrawWork {
             width,
             height,
         );
-        let images: Vec<_> = message.image_attachments().collect();
+        let images = app.preview_images(message);
         let index = images
             .iter()
-            .position(|a| a.element_id == attachment.element_id)
+            .position(|(m, a)| {
+                m.id == message.id
+                    && m.forward_path == message.forward_path
+                    && a.element_id == attachment.element_id
+            })
             .unwrap_or(0)
             + 1;
         let label = match zoom {
@@ -1324,8 +1328,8 @@ fn draw_modal(
         } else {
             0
         };
-        let text_width = inner.width.saturating_sub(gutter).max(1) as usize;
-        let prefix = " ".repeat(usize::from(gutter));
+        let text_width = inner.width.saturating_sub(gutter + 4).max(1) as usize;
+        let prefix = " ".repeat(usize::from(gutter + 2));
         let mut avatar_rows = vec![];
         let mut rows = Vec::new();
         let mut ranges = Vec::new();
@@ -1336,9 +1340,10 @@ fn draw_modal(
                 message_index.checked_sub(1).and_then(|i| messages.get(i)),
                 message,
             );
+            let start = rows.len();
+            rows.push(String::new());
             if message.is_notice() {
-                let start = rows.len();
-                for row in wrap(&message.notice_text(), inner.width as usize) {
+                for row in wrap(&message.notice_text(), text_width) {
                     notice_rows.insert(rows.len());
                     rows.push(row);
                 }
@@ -1346,9 +1351,8 @@ fn draw_modal(
                 ranges.push((start, rows.len()));
                 continue;
             }
-            let start = rows.len();
             if gutter > 0 && show_header {
-                avatar_rows.push((start, message.sender_uid.clone()));
+                avatar_rows.push((start + 1, message.sender_uid.clone()));
             }
             rows.push(if !show_header {
                 String::new()
@@ -1373,7 +1377,7 @@ fn draw_modal(
             for image in &body.images {
                 placements.push((
                     body_start + image.row,
-                    image.column + usize::from(gutter),
+                    image.column + usize::from(gutter + 2),
                     image.width,
                     image.height,
                     message.clone(),
@@ -1425,6 +1429,31 @@ fn draw_modal(
             ),
             inner,
         );
+        let top = selected.0.max(*scroll);
+        let bottom = selected
+            .1
+            .min(scroll.saturating_add(usize::from(inner.height)));
+        if top < bottom {
+            let mut borders = Borders::LEFT | Borders::RIGHT;
+            if top == selected.0 {
+                borders |= Borders::TOP;
+            }
+            if bottom == selected.1 {
+                borders |= Borders::BOTTOM;
+            }
+            frame.render_widget(
+                Block::default()
+                    .borders(borders)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(CYAN)),
+                Rect::new(
+                    inner.x + gutter,
+                    inner.y + (top - *scroll) as u16,
+                    inner.width.saturating_sub(gutter),
+                    (bottom - top) as u16,
+                ),
+            );
+        }
         for (row, uid) in avatar_rows {
             avatar(
                 frame,

@@ -821,6 +821,30 @@ impl App {
         self.pending_dialog = None;
         true
     }
+    pub fn preview_images<'a>(
+        &'a self,
+        message: &'a Message,
+    ) -> Vec<(&'a Message, &'a Attachment)> {
+        let messages = match self.modal_return.as_deref() {
+            Some(Modal::Forward { messages, .. }) => messages.as_slice(),
+            _ => self
+                .chats
+                .get(&message.peer)
+                .map_or(&[][..], |chat| chat.messages.as_slice()),
+        };
+        let messages = if messages
+            .iter()
+            .any(|m| m.id == message.id && m.forward_path == message.forward_path)
+        {
+            messages
+        } else {
+            std::slice::from_ref(message)
+        };
+        messages
+            .iter()
+            .flat_map(|m| m.image_attachments().map(move |a| (m, a)))
+            .collect()
+    }
     pub fn chat(&self) -> Option<&Chat> {
         self.selected_peer.as_ref().and_then(|p| self.chats.get(p))
     }
@@ -4759,10 +4783,14 @@ mod requested_features_tests {
             }],
             ..Default::default()
         };
+        let next = Message {
+            id: "13".into(),
+            ..message.clone()
+        };
         app.modal = Modal::Forward {
             root: app.chat().unwrap().messages[0].clone(),
             path: vec!["1".into()],
-            messages: vec![message],
+            messages: vec![message, next],
             index: 0,
             scroll: 0,
         };
@@ -4775,9 +4803,13 @@ mod requested_features_tests {
                 images = crate::ui::draw(frame, &mut app, &mut media).images.len();
             })
             .unwrap();
-        assert_eq!(images, 1);
+        assert_eq!(images, 2);
         app.key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE));
         assert!(matches!(app.modal, Modal::Preview { .. }));
+        app.key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE));
+        assert!(matches!(&app.modal, Modal::Preview { message, .. } if message.id == "13"));
+        app.key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        assert!(matches!(&app.modal, Modal::Preview { message, .. } if message.id == "12"));
         app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(matches!(app.modal, Modal::Forward { .. }));
     }

@@ -1155,7 +1155,7 @@ impl App {
                 }
             }
             Modal::Preview {
-                message,
+                mut message,
                 mut attachment,
                 mut zoom,
             } => {
@@ -1190,11 +1190,12 @@ impl App {
                             attachment.warning = None;
                         }
                         KeyCode::Left | KeyCode::Right | KeyCode::Char('h' | 'j' | 'k' | 'l') => {
-                            let images: Vec<_> = message.image_attachments().collect();
-                            if let Some(current) = images
-                                .iter()
-                                .position(|a| a.element_id == attachment.element_id)
-                            {
+                            let images = self.preview_images(&message);
+                            if let Some(current) = images.iter().position(|(m, a)| {
+                                m.id == message.id
+                                    && m.forward_path == message.forward_path
+                                    && a.element_id == attachment.element_id
+                            }) {
                                 let previous =
                                     matches!(key.code, KeyCode::Left | KeyCode::Char('h' | 'k'));
                                 let next = if previous {
@@ -1202,7 +1203,9 @@ impl App {
                                 } else {
                                     (current + 1).min(images.len() - 1)
                                 };
-                                attachment = images[next].clone();
+                                let (next_message, next_attachment) = images[next];
+                                (message, attachment) =
+                                    (next_message.clone(), next_attachment.clone());
                             }
                         }
                         _ => {}
