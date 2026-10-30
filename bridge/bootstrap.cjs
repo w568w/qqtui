@@ -39,6 +39,7 @@ const bridge = new NativeBridge(process.env.QQTUI_SOCKET, {
   cacheDir: process.env.QQTUI_CACHE_DIR,
   profileDir: app.getPath("userData"),
   userData: accounts.root,
+  expectedAccount: accounts.expected,
   qqVersion: app.getVersion(),
   desktop,
 });
@@ -92,6 +93,7 @@ process.dlopen = function (module, filename, ...args) {
     return result;
   }
   const wrapper = module.exports;
+  bridge.wrapper = wrapper;
   bridge.phase = "login";
   logger.log("[qqtui] captured QQ wrapper");
   const wrapSession = (session) =>

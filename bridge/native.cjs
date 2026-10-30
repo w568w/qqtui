@@ -320,6 +320,9 @@ class NativeBridge {
     this.mediaWaiters = new Map();
     this.transfers = new Map();
     this.groupFileRequest = null;
+    this.quickLoginAttempt = null;
+    this.loginConnected = false;
+    this.loginConnecting = false;
     this.notificationIds = new Map();
     this.unreadCounts = new Map();
     this.groupWaiters = new Set();
@@ -1002,7 +1005,7 @@ class NativeBridge {
         socket,
       );
       if (
-        !["host.status", "events.subscribe"].includes(request.method) &&
+        !["host.status", "host.login", "events.subscribe"].includes(request.method) &&
         (epoch !== this.epoch ||
           account !== this.account ||
           session !== this.session)
@@ -1200,6 +1203,35 @@ class NativeBridge {
   }
   async call(method, p, socket) {
     if (method === "host.status") return this.status();
+    if (method === "host.login") {
+      if (this.phase !== "login") return { attempted: false };
+      const login = this.wrapper?.NodeIKernelLoginService?.get?.();
+      if (!login?.getLoginList || !login?.quickLoginWithUin) return { attempted: false };
+      const account = p.account || this.options.expectedAccount;
+      if (this.options.expectedAccount && account !== this.options.expectedAccount)
+        throw new Error("Account does not belong to this host");
+      const items = checked(await login.getLoginList()).LocalLoginInfoList || [];
+      const item = items.find(item => String(item.uin) === account && item.isQuickLogin);
+      if (!item) return { attempted: false };
+      if (!this.loginConnecting) {
+        login.addKernelLoginListener(listener({
+          onLoginConnected: () => { this.loginConnected = true; },
+          onLoginDisconnected: () => { this.loginConnected = false; },
+        }));
+        this.loginConnecting = true;
+        login.connect();
+      }
+      if (!this.loginConnected || login.getMsfStatus() === 3)
+        return { attempted: false, pending: true };
+      this.quickLoginAttempt ??= login.quickLoginWithUin(String(item.uin))
+        .then(result => {
+          if (result.loginErrorInfo?.errMsg)
+            throw new Error(`QQ: ${result.loginErrorInfo.errMsg} (${result.result})`);
+          checked(result);
+          return { attempted: true };
+        });
+      return this.quickLoginAttempt;
+    }
     if (method === "host.viewer") {
       if (!this.options.desktop) throw new Error("QQ desktop control unavailable");
       if (typeof p.active !== "boolean") throw new Error("Viewer state required");

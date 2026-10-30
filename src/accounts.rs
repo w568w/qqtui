@@ -271,6 +271,8 @@ pub async fn ensure_started(base: &Paths, paths: &Paths) -> Result<()> {
 
 pub async fn login_if_needed(paths: &Paths) -> Result<()> {
     let mut login_since = None;
+    let mut quick_login = false;
+    let mut login_wait = Duration::from_secs(2);
     let deadline = std::time::Instant::now() + Duration::from_secs(60);
     let mut last_phase = String::new();
     while std::time::Instant::now() < deadline {
@@ -286,8 +288,34 @@ pub async fn login_if_needed(paths: &Paths) -> Result<()> {
                 anyhow::bail!("{}", status.errors.join("；"));
             }
             if status.phase == "login" {
+                if !quick_login {
+                    let (tx, _rx) = tokio::sync::mpsc::channel(4);
+                    if let Ok(backend) = Backend::connect(&paths.socket(), tx).await {
+                        let account = paths.account.clone().or(paths.known_account()?);
+                        match backend
+                            .call::<serde_json::Value>(
+                                "host.login",
+                                serde_json::json!({"account":account}),
+                            )
+                            .await
+                        {
+                            Ok(result) if result["attempted"] == true => {
+                                quick_login = true;
+                                login_wait = Duration::from_secs(15);
+                                login_since = Some(std::time::Instant::now());
+                                eprintln!("QQ 宿主：正在自动登录");
+                            }
+                            Ok(result) if result["pending"] == true => login_since = None,
+                            Ok(_) => {}
+                            Err(error) => {
+                                quick_login = true;
+                                eprintln!("自动登录失败：{error}");
+                            }
+                        }
+                    }
+                }
                 let since = login_since.get_or_insert_with(std::time::Instant::now);
-                if since.elapsed() >= Duration::from_secs(2) {
+                if since.elapsed() >= login_wait {
                     println!("在 QQ 页面完成登录后，在此终端按 Ctrl+C 关闭临时查看器并进入聊天。");
                     crate::viewer::run(paths, false).await?;
                     return Ok(());

@@ -26,6 +26,34 @@ function fixture(t) {
   return { b, count: () => count, dir,journals };
 }
 const peer = { chat_type: 1, uid: 'u_self' };
+test('quick login uses only the selected saved account and submits once', async t => {
+  const {b}=fixture(t);b.phase='login';b.options.expectedAccount='123';
+  const attempts=[];let msfStatus=3;let callbacks;let connects=0;
+  b.wrapper={NodeIKernelLoginService:{get:()=>({
+    getLoginList:async()=>({result:0,LocalLoginInfoList:[{uin:'456',isQuickLogin:true},{uin:'123',isQuickLogin:true}]}),
+    getMsfStatus:()=>msfStatus,
+    addKernelLoginListener:value=>{callbacks=value;},
+    connect:()=>{connects++;},
+    quickLoginWithUin:async uin=>{attempts.push(uin);return{result:0};},
+  })}};
+  assert.deepEqual(await b.call('host.login',{account:'123'},{}),{attempted:false,pending:true});
+  assert.deepEqual(attempts,[]);
+  msfStatus=0;
+  assert.deepEqual(await b.call('host.login',{account:'123'},{}),{attempted:false,pending:true});
+  callbacks.onLoginConnected();
+  msfStatus=1;
+  assert.deepEqual(await b.call('host.login',{account:'123'},{}),{attempted:true});
+  await b.call('host.login',{account:'123'},{});
+  assert.deepEqual(attempts,['123']);
+  assert.equal(connects,1);
+  b.quickLoginAttempt=null;
+  b.wrapper.NodeIKernelLoginService.get=()=>({getLoginList:async()=>({result:0,LocalLoginInfoList:[{uin:'123',isQuickLogin:true}]}),getMsfStatus:()=>0,quickLoginWithUin:async()=>({result:'1006511',loginErrorInfo:{errMsg:'网络未连接'}})});
+  await assert.rejects(b.call('host.login',{account:'123'},{}),/网络未连接.*1006511/);
+  await assert.rejects(b.call('host.login',{account:'456'},{}),/does not belong/);
+  b.quickLoginAttempt=null;
+  b.wrapper.NodeIKernelLoginService.get=()=>({getLoginList:async()=>({result:0,LocalLoginInfoList:[{uin:'123',isQuickLogin:false}]}),getMsfStatus:()=>0,quickLoginWithUin:()=>assert.fail()});
+  assert.deepEqual(await b.call('host.login',{account:'123'},{}),{attempted:false});
+});
 test('group file pages reject unrelated callbacks and cancel with the session', async t => {
   const {b}=fixture(t);const group={chat_type:2,uid:'1234'};let parameters;
   b.session.getRichMediaService=()=>({getGroupFileList:async(...args)=>{parameters=args;return{result:0,reqId:7};}});

@@ -80,18 +80,15 @@ async fn main() -> Result<()> {
     }
     match cli.command {
         None => {
-            if cli.account.is_none() {
-                if let Some(selected) = accounts::choose(&base).await? {
-                    accounts::ensure_started(&base, &selected).await?;
-                    accounts::login_if_needed(&selected).await?;
-                    app::run(selected).await?;
-                }
+            let selected = if cli.account.is_none() {
+                accounts::choose(&base).await?
             } else {
-                if paths.account.is_some() {
-                    accounts::ensure_started(&base, &paths).await?;
-                    accounts::login_if_needed(&paths).await?;
-                }
-                app::run(paths).await?;
+                Some(paths)
+            };
+            if let Some(selected) = selected {
+                accounts::ensure_started(&base, &selected).await?;
+                accounts::login_if_needed(&selected).await?;
+                app::run(selected).await?;
             }
         }
         Some(Command::Accounts) => println!(
