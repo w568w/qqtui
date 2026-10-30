@@ -26,6 +26,29 @@ function fixture(t) {
   return { b, count: () => count, dir,journals };
 }
 const peer = { chat_type: 1, uid: 'u_self' };
+test('group file pages reject unrelated callbacks and cancel with the session', async t => {
+  const {b}=fixture(t);const group={chat_type:2,uid:'1234'};let parameters;
+  b.session.getRichMediaService=()=>({getGroupFileList:async(...args)=>{parameters=args;return{result:0,reqId:7};}});
+  const request=b.call('files.list',{account:'123',peer:group,folder:'folder',start:100},{});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(parameters[0],'1234');assert.equal(parameters[1].folderId,'folder');assert.equal(parameters[1].startIndex,100);
+  await assert.rejects(b.call('files.list',{account:'123',peer:group},{}),/正在读取/);
+  b.groupFileRequest.update({reqId:6,isEnd:true,item:[]});
+  b.groupFileRequest.update({reqId:7,isEnd:true,item:[{peerId:'999',fileInfo:{parentFolderId:'folder'}}]});
+  b.groupFileRequest.update({reqId:7,isEnd:false,nextIndex:102,item:[
+    {peerId:'1234',fileInfo:{fileId:'f',fileName:'文档.pdf',fileSize:'9007199254740993',parentFolderId:'folder',uploaderName:'Alice'}},
+    {peerId:'1234',folderInfo:{folderId:'d',folderName:'目录',parentFolderId:'folder'}},
+  ]});
+  const result=await request;
+  assert.equal(result.items[0].size,'9007199254740993');assert.equal(result.items[1].folder,true);assert.equal(result.next,102);
+  assert.equal(b.groupFileRequest,null);
+  const canceled=b.call('files.list',{account:'123',peer:group},{});
+  assert.equal(parameters[1].folderId,'/');
+  b.unsubscribe(true);
+  await assert.rejects(canceled,/session changed/);
+  assert.equal(b.groupFileRequest,null);
+  await assert.rejects(b.call('files.list',{account:'123',peer},{}),/仅适用于群聊/);
+});
 test('file transfer progress is scoped, throttled and removed on completion', async t => {
   const {b}=fixture(t);const events=[];b.event=(kind,value)=>events.push({kind,...value});
   b.mediaWaiters.set('1:2',{name:'a.pdf'});

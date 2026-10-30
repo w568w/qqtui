@@ -408,6 +408,7 @@ impl App {
             "quit",
             "actions",
             "members",
+            "group_files",
             "contacts",
             "attach",
             "sticker_file",
@@ -613,6 +614,15 @@ impl App {
                 }
             }
             "members" => return vec![Action::Members(false)],
+            "group_files" => {
+                if let Some(peer) = self.selected_peer.clone() {
+                    return vec![Action::GroupFiles {
+                        peer,
+                        folders: vec![],
+                        start: 0,
+                    }];
+                }
+            }
             "profile" => {
                 if self.selected_peer.as_ref().is_some_and(|p| p.is_group()) {
                     return vec![Action::Members(false)];
@@ -733,6 +743,7 @@ impl App {
                         | Modal::Objects { .. }
                         | Modal::ConfirmRecall(_)
                         | Modal::Profile(_)
+                        | Modal::GroupFiles { .. }
                 )
         {
             self.pending_dialog = None;
@@ -1308,6 +1319,80 @@ impl App {
                         members,
                         mention,
                     }
+                }
+            }
+            Modal::GroupFiles {
+                peer,
+                mut folders,
+                page,
+                mut index,
+            } => {
+                let parent = usize::from(!folders.is_empty());
+                let count = page.items.len() + parent + usize::from(page.next.is_some());
+                if matches!(
+                    key.code,
+                    KeyCode::Left | KeyCode::Backspace | KeyCode::Char('h')
+                ) && parent == 1
+                {
+                    folders.pop();
+                    actions.push(Action::GroupFiles {
+                        peer: peer.clone(),
+                        folders: folders.clone(),
+                        start: 0,
+                    });
+                } else if matches!(
+                    key.code,
+                    KeyCode::Enter | KeyCode::Right | KeyCode::Char('l')
+                ) {
+                    if parent == 1 && index == 0 {
+                        folders.pop();
+                        actions.push(Action::GroupFiles {
+                            peer: peer.clone(),
+                            folders: folders.clone(),
+                            start: 0,
+                        });
+                    } else if let Some(item) = page.items.get(index.saturating_sub(parent)) {
+                        if item.folder {
+                            folders.push(item.clone());
+                            actions.push(Action::GroupFiles {
+                                peer: peer.clone(),
+                                folders: folders.clone(),
+                                start: 0,
+                            });
+                        }
+                    } else if let Some(start) = page.next {
+                        actions.push(Action::GroupFiles {
+                            peer: peer.clone(),
+                            folders: folders.clone(),
+                            start,
+                        });
+                    }
+                } else {
+                    match key.code {
+                        KeyCode::Home => index = 0,
+                        KeyCode::End | KeyCode::Char('G') => index = count.saturating_sub(1),
+                        KeyCode::Char('g') => {
+                            if self.key_prefix == "g"
+                                && self.prefix_at.elapsed() < Duration::from_secs(1)
+                            {
+                                index = 0;
+                                self.key_prefix.clear();
+                            } else {
+                                self.key_prefix = "g".into();
+                                self.prefix_at = Instant::now();
+                            }
+                        }
+                        _ => {
+                            self.key_prefix.clear();
+                            move_picker(key, &mut index, count);
+                        }
+                    }
+                }
+                Modal::GroupFiles {
+                    peer,
+                    folders,
+                    page,
+                    index,
                 }
             }
             Modal::Contacts {

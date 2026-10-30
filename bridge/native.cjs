@@ -319,6 +319,7 @@ class NativeBridge {
     this.inflight = new Map();
     this.mediaWaiters = new Map();
     this.transfers = new Map();
+    this.groupFileRequest = null;
     this.notificationIds = new Map();
     this.unreadCounts = new Map();
     this.groupWaiters = new Set();
@@ -496,6 +497,8 @@ class NativeBridge {
     if (this.options.desktop) capabilities.push("desktop_viewer");
     if (this.phase === "ready" && typeof this.msg?.getFirstUnreadMsgSeq === "function" && typeof this.msg?.getSingleMsg === "function") capabilities.push("unread_anchor");
     if (this.phase === "ready") {
+      if (typeof this.session?.getRichMediaService?.()?.getGroupFileList === "function")
+        capabilities.push("group_files");
       if (
         typeof this.msg?.fetchFavEmojiList === "function" ||
         this.resources.faces.size
@@ -732,6 +735,7 @@ class NativeBridge {
         this.stickers.clear();
         this.event("stickers.invalidated");
       },
+      onGroupFileInfoUpdate: (result) => this.groupFileRequest?.update(result),
       onRichMediaProgerssUpdate: (result) => this.transfer(result),
       onRichMediaUploadComplete: (result) => this.transfer(result, true),
       onRichMediaDownloadComplete: (result) => {
@@ -824,6 +828,7 @@ class NativeBridge {
     for (const request of [...this.mediaWaiters.values()])
       request.finish(new Error("QQ media session changed"));
     this.mediaWaiters.clear();
+    this.groupFileRequest?.finish(new Error("QQ file session changed"));
     this.transfers.clear();
     for (const cancel of [...this.viewCancels]) cancel();
     this.viewRequests.clear();
@@ -1235,6 +1240,7 @@ class NativeBridge {
     )
       throw new Error("Session context changed; refresh the session");
     if (method === "conversations.snapshot") return this.snapshot();
+    if (method === "files.list") return this.groupFiles(p);
     if (method === "conversations.children" && p.peer?.chat_type === 7)
       return this.snapshot(2);
 
@@ -2042,6 +2048,58 @@ class NativeBridge {
       this.transfers.set(key, transfer);
     }
     this.event("transfer", { transfer });
+  }
+  async groupFiles(p) {
+    const peer = nativePeer(p.peer);
+    if (peer.chatType !== 2) throw new Error("群文件仅适用于群聊");
+    const context = this.sessionContext();
+    const service = context.session.getRichMediaService?.();
+    if (typeof service?.getGroupFileList !== "function") throw new Error("QQ 群文件接口不可用");
+    if (this.groupFileRequest) throw new Error("群文件列表正在读取，请稍后重试");
+    const start = p.start ?? 0;
+    const folder = p.folder === "" ? "/" : (p.folder ?? "/");
+    if (!Number.isSafeInteger(start) || start < 0 || typeof folder !== "string" || folder.length > 1024)
+      throw new Error("Invalid group file page");
+    let finish;
+    const response = new Promise((resolve, reject) => { finish = (error, value) => error ? reject(error) : resolve(value); });
+    const timer = setTimeout(() => finish(new Error("群文件列表读取超时")), 15000);
+    const request = {
+      finish,
+      update: result => {
+        const items = result.item;
+        if (!Array.isArray(items)) return finish(new Error("QQ 群文件列表格式不兼容"));
+        if (items.some(item => String(item.peerId) !== peer.peerUid ||
+          (folder && String(item.fileInfo?.parentFolderId ?? item.folderInfo?.parentFolderId ?? "") !== folder))) return;
+        if (request.reqId !== undefined && result.reqId !== request.reqId) return;
+        if (Number(result.retCode || 0)) return finish(new Error(cleanText(result.clientWording || result.retMsg || "群文件读取失败")));
+        const next = Number(result.nextIndex);
+        if (!result.isEnd && (!Number.isSafeInteger(next) || next <= start))
+          return finish(new Error("QQ 群文件分页未前进"));
+        finish(null, {
+          items: items.map(item => {
+            const file = item.fileInfo, dir = item.folderInfo;
+            return { id: String(file?.fileId || dir?.folderId || ""), name: cleanText(file?.fileName || dir?.folderName || ""),
+              folder: Boolean(dir), size: String(file?.fileSize || "0"), owner: cleanText(file?.uploaderName || dir?.creatorName || "") };
+          }),
+          next: result.isEnd ? null : next,
+        });
+      },
+    };
+    this.groupFileRequest = request;
+    try {
+      Promise.resolve(service.getGroupFileList(peer.peerUid, {
+        sortType: 1, fileCount: 100, startIndex: start, sortOrder: 2, showOnlinedocFolder: 0, folderId: folder,
+      })).then(result => {
+        checked(result);
+        if (result?.reqId !== undefined) request.reqId = result.reqId;
+      }).catch(finish);
+      const result = await response;
+      context.check();
+      return result;
+    } finally {
+      clearTimeout(timer);
+      if (this.groupFileRequest === request) this.groupFileRequest = null;
+    }
   }
   async resolve(p, peer) {
     if (!isNativeId(p.id) || !isNativeId(p.element_id, true))

@@ -9,8 +9,8 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph,
-        Wrap,
+        Block, BorderType, Borders, Cell, Clear, HighlightSpacing, List, ListItem, ListState,
+        Paragraph, Row, Table, TableState, Wrap,
     },
 };
 use ratatui_image::sliced::{SignedPosition, SlicedImage};
@@ -1250,6 +1250,164 @@ fn draw_modal(
         )
     });
     frame.render_widget(Clear, rect);
+    if let Modal::GroupFiles {
+        peer,
+        folders,
+        page,
+        index,
+    } = &app.modal
+    {
+        let block = panel(" 群文件 ".into(), true);
+        let inner = block.inner(rect);
+        frame.render_widget(block, rect);
+        let [path, body, detail, keys] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(2),
+            Constraint::Length(1),
+        ])
+        .areas(inner);
+        let directory = format!(
+            "{}/{}",
+            peer.uid,
+            folders
+                .iter()
+                .map(|f| safe_text(&f.name))
+                .collect::<Vec<_>>()
+                .join("/")
+        );
+        frame.render_widget(
+            Paragraph::new(directory).style(Style::default().fg(CYAN)),
+            path,
+        );
+        let parent = usize::from(!folders.is_empty());
+        let readable_size = |size: &str| {
+            let Ok(bytes) = size.parse::<u64>() else {
+                return "—".into();
+            };
+            let mut value = bytes as f64;
+            let units = ["B", "KiB", "MiB", "GiB", "TiB"];
+            let mut unit = 0;
+            while value >= 1024.0 && unit < units.len() - 1 {
+                value /= 1024.0;
+                unit += 1;
+            }
+            if unit == 0 {
+                format!("{bytes} B")
+            } else {
+                format!("{value:.1} {}", units[unit])
+            }
+        };
+        let mut rows = Vec::new();
+        if parent == 1 {
+            rows.push(
+                Row::new(vec![Cell::from("../"), Cell::from(""), Cell::from("")])
+                    .style(Style::default().fg(CYAN)),
+            );
+        }
+        for file in &page.items {
+            rows.push(
+                Row::new(vec![
+                    Cell::from(format!(
+                        "{}{}",
+                        safe_text(&file.name),
+                        if file.folder { "/" } else { "" }
+                    )),
+                    Cell::from(
+                        Line::from(if file.folder {
+                            "目录".into()
+                        } else {
+                            readable_size(&file.size)
+                        })
+                        .right_aligned(),
+                    ),
+                    Cell::from(safe_text(&file.owner)),
+                ])
+                .style(Style::default().fg(if file.folder {
+                    CYAN
+                } else {
+                    Color::White
+                })),
+            );
+        }
+        if page.next.is_some() {
+            rows.push(Row::new(vec!["下一页 →", "", ""]).style(Style::default().fg(CYAN)));
+        }
+        let count = rows.len();
+        let widths = if body.width >= 65 {
+            vec![
+                Constraint::Min(10),
+                Constraint::Length(11),
+                Constraint::Length(18),
+            ]
+        } else if body.width >= 35 {
+            vec![
+                Constraint::Min(8),
+                Constraint::Length(11),
+                Constraint::Length(0),
+            ]
+        } else {
+            vec![
+                Constraint::Min(1),
+                Constraint::Length(0),
+                Constraint::Length(0),
+            ]
+        };
+        let table = Table::new(rows, widths)
+            .header(
+                Row::new(vec!["名称", "       大小", "上传者"]).style(Style::default().fg(MUTED)),
+            )
+            .column_spacing(2)
+            .row_highlight_style(
+                Style::default()
+                    .bg(Color::Rgb(35, 55, 62))
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol("▸ ");
+        frame.render_stateful_widget(
+            table,
+            body,
+            &mut TableState::default().with_selected((count > 0).then_some(*index)),
+        );
+        if count == 0 {
+            frame.render_widget(
+                Paragraph::new("此目录没有文件").style(Style::default().fg(MUTED)),
+                body,
+            );
+        }
+        let description = if count == 0 {
+            String::new()
+        } else if parent == 1 && *index == 0 {
+            "返回上级目录".into()
+        } else if let Some(file) = page.items.get(index.saturating_sub(parent)) {
+            format!(
+                "{}\n{} · {}",
+                safe_text(&file.name),
+                if file.folder {
+                    "目录".into()
+                } else {
+                    readable_size(&file.size)
+                },
+                safe_text(&file.owner)
+            )
+        } else {
+            "读取下一页".into()
+        };
+        frame.render_widget(
+            Paragraph::new(description).style(Style::default().fg(MUTED)),
+            detail,
+        );
+        frame.render_widget(
+            Paragraph::new(format!(
+                "h 上级 · l/Enter 进入 · gg/G 首尾 · Esc 关闭  {}/{}",
+                if count == 0 { 0 } else { index + 1 },
+                count
+            ))
+            .style(Style::default().fg(CYAN)),
+            keys,
+        );
+        return;
+    }
     if let Modal::EmojiPicker {
         token,
         purpose,
@@ -1686,6 +1844,7 @@ fn draw_modal(
                 ("first_unread", "跳到进入会话时的最早未读消息"),
                 ("back", "返回跳转前的阅读位置"),
                 ("members", "群成员"),
+                ("group_files", "群文件"),
                 ("profile", "会话资料"),
                 ("outbox", "发送记录"),
                 ("contacts", "联系人"),
@@ -1745,6 +1904,7 @@ fn draw_modal(
                 .collect(),
             *index,
         ),
+        Modal::GroupFiles { .. } => return,
         Modal::Members {
             query,
             index,

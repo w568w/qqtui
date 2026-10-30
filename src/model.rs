@@ -13,6 +13,19 @@ pub struct Transfer {
     pub total: String,
     pub finished: bool,
 }
+#[derive(Clone, Debug, Deserialize)]
+pub struct GroupFile {
+    pub id: String,
+    pub name: String,
+    pub folder: bool,
+    pub size: String,
+    pub owner: String,
+}
+#[derive(Clone, Debug, Deserialize)]
+pub struct GroupFiles {
+    pub items: Vec<GroupFile>,
+    pub next: Option<u32>,
+}
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, Hash)]
 pub struct Peer {

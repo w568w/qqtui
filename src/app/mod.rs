@@ -547,6 +547,12 @@ fn open_objects(message: Message, items: Vec<OpenTarget>) -> (Modal, Vec<Action>
     }
 }
 pub enum Modal {
+    GroupFiles {
+        peer: Peer,
+        folders: Vec<GroupFile>,
+        page: GroupFiles,
+        index: usize,
+    },
     Objects {
         message: Message,
         items: Vec<OpenTarget>,
@@ -650,6 +656,11 @@ pub enum HistoryPoint {
     Around(String),
 }
 pub enum Action {
+    GroupFiles {
+        peer: Peer,
+        folders: Vec<GroupFile>,
+        start: u32,
+    },
     EmojiCatalog(EmojiPurpose),
     ChooseSticker(Sticker),
     Reactions(Message),
@@ -925,6 +936,7 @@ impl App {
                 | Modal::EmojiPicker { .. }
                 | Modal::Reactions { .. }
                 | Modal::ReactionMembers { .. }
+                | Modal::GroupFiles { .. }
         ) {
             self.pending_dialog = None;
             self.modal = Modal::None;
@@ -1032,6 +1044,7 @@ impl App {
                 "quit" => "q",
                 "actions" => "space",
                 "members" => "m",
+                "group_files" => "F",
                 "contacts" => "c",
                 "attach" => "a",
                 "sticker_file" => "A",
@@ -4987,6 +5000,146 @@ mod requested_features_tests {
 #[cfg(test)]
 mod release_regressions {
     use super::*;
+    #[test]
+    fn group_file_table_keeps_metadata_aligned_and_directory_navigation_visible() {
+        let mut app = App::new(Config::default());
+        let peer = Peer {
+            chat_type: 2,
+            uid: "1234".into(),
+        };
+        let folder = GroupFile {
+            id: "d".into(),
+            name: "共享资料".into(),
+            folder: true,
+            size: "0".into(),
+            owner: "Alice".into(),
+        };
+        app.modal = Modal::GroupFiles {
+            peer,
+            folders: vec![folder.clone()],
+            page: GroupFiles {
+                items: vec![
+                    folder,
+                    GroupFile {
+                        id: "f".into(),
+                        name: "会议记录.pdf".into(),
+                        folder: false,
+                        size: "1572864".into(),
+                        owner: "Bob".into(),
+                    },
+                ],
+                next: None,
+            },
+            index: 2,
+        };
+        let mut media = media::Media::new(ratatui_image::picker::Picker::halfblocks());
+        for width in [120, 65, 30] {
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, 30)).unwrap();
+            terminal
+                .draw(|frame| {
+                    crate::ui::draw(frame, &mut app, &mut media);
+                })
+                .unwrap();
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(text.contains("1.5 MiB"));
+            assert!(text.contains("Bob"));
+        }
+        app.key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        app.key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        assert!(matches!(app.modal, Modal::GroupFiles { index: 0, .. }));
+        app.key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE));
+        assert!(matches!(app.modal, Modal::GroupFiles { index: 2, .. }));
+        assert!(
+            matches!(app.key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE)).as_slice(), [Action::GroupFiles { folders, start: 0, .. }] if folders.is_empty())
+        );
+    }
+    #[test]
+    fn group_files_navigation_and_progress_leave_chat_interactive() {
+        let mut app = App::new(Config::default());
+        let peer = Peer {
+            chat_type: 2,
+            uid: "1234".into(),
+        };
+        app.selected_peer = Some(peer.clone());
+        app.transfers.insert(
+            "1:2".into(),
+            Transfer {
+                id: "1:2".into(),
+                direction: "download".into(),
+                name: "a.pdf".into(),
+                done: "500".into(),
+                total: "1000".into(),
+                finished: false,
+            },
+        );
+        assert!(matches!(
+            app.key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE))
+                .as_slice(),
+            [Action::Members(false)]
+        ));
+        assert!(matches!(
+            app.key(KeyEvent::new(KeyCode::Char('F'), KeyModifiers::NONE))
+                .as_slice(),
+            [Action::GroupFiles { start: 0, .. }]
+        ));
+        let page = GroupFiles {
+            items: vec![GroupFile {
+                id: "folder".into(),
+                name: "资料".into(),
+                folder: true,
+                size: "0".into(),
+                owner: "Alice".into(),
+            }],
+            next: Some(100),
+        };
+        app.modal = Modal::GroupFiles {
+            peer: peer.clone(),
+            folders: vec![],
+            page: page.clone(),
+            index: 0,
+        };
+        assert!(
+            matches!(app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)).as_slice(), [Action::GroupFiles { folders, start: 0, .. }] if folders.len() == 1 && folders[0].id == "folder")
+        );
+        app.modal = Modal::GroupFiles {
+            peer: peer.clone(),
+            folders: vec![],
+            page,
+            index: 0,
+        };
+        app.key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert!(matches!(
+            app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+                .as_slice(),
+            [Action::GroupFiles { start: 100, .. }]
+        ));
+        app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!app.modal.is_open());
+        assert_eq!(app.transfers.len(), 1);
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 30)).unwrap();
+        let mut media = media::Media::new(ratatui_image::picker::Picker::halfblocks());
+        terminal
+            .draw(|frame| {
+                crate::ui::draw(frame, &mut app, &mut media);
+            })
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("a.pdf 50% (500/1000 B)"), "{text}");
+    }
     fn message(id: &str) -> Message {
         Message {
             id: id.into(),

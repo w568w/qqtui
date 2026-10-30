@@ -1200,6 +1200,32 @@ impl Controller {
                     });
                 }
             }
+            Action::GroupFiles {
+                peer,
+                folders,
+                start,
+            } => {
+                if !peer.is_group() {
+                    app.notice = "群文件仅适用于群聊".into();
+                    return;
+                }
+                if let Some(b) = self.ready_backend(app) {
+                    let token = app.begin_dialog("读取群文件…");
+                    tokio::spawn(async move {
+                        let result = b.call("files.list", json!({"account":account,"peer":peer,"folder":folders.last().map(|folder| folder.id.as_str()).unwrap_or(""),"start":start})).await;
+                        let _ = tx
+                            .send(Work::GroupFiles {
+                                token,
+                                peer,
+                                folders,
+                                result,
+                            })
+                            .await;
+                    });
+                } else {
+                    app.notice = "QQ 原生服务未就绪".into();
+                }
+            }
             Action::Members(mention) => {
                 if let (Some(b), Some(peer)) = (self.ready_backend(app), peer) {
                     if !peer.is_group() {
