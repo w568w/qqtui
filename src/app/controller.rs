@@ -994,6 +994,25 @@ impl Controller {
                     app.notice = "QQ 原生服务未就绪".into();
                 }
             }
+            Action::GroupInfo => {
+                if let (Some(b), Some(peer)) = (self.ready_backend(app), peer) {
+                    let token = app.begin_dialog("读取群资料…");
+                    tokio::spawn(async move {
+                        let result = b
+                            .call("groups.info", json!({"account":account,"peer":peer}))
+                            .await;
+                        let _ = tx
+                            .send(Work::GroupInfo {
+                                token,
+                                peer,
+                                result,
+                            })
+                            .await;
+                    });
+                } else {
+                    app.notice = "QQ 原生服务未就绪".into();
+                }
+            }
             Action::Profile(uid) => {
                 if let (Some(b), Some(peer)) = (self.ready_backend(app), peer) {
                     let token = app.begin_dialog("读取联系人资料…");

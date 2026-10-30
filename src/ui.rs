@@ -412,7 +412,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, media: &mut Media) -> DrawWork {
     let show_sidebar = app.config.sidebar_visible && body.width >= 72;
     let details_sidebar = matches!(
         app.modal,
-        Modal::Members { mention: false, .. } | Modal::Profile(_)
+        Modal::Members { mention: false, .. } | Modal::Profile(_) | Modal::GroupInfo(_)
     ) && body.width >= 110;
     let [sidebar, chat_area, details_area] = Layout::horizontal([
         Constraint::Length(if show_sidebar {
@@ -1959,6 +1959,21 @@ fn draw_modal(
             "撤回消息 · Enter 确认 · Esc 取消".into(),
             String::new(),
             vec![(m.text.clone(), true)],
+            0,
+        ),
+        Modal::GroupInfo(info) => (
+            "群资料 · Esc 关闭".into(),
+            String::new(),
+            vec![
+                (format!("群名：{}", info.name), true),
+                (format!("群号：{}", info.code), true),
+                (format!("备注：{}", info.remark), true),
+                (format!("成员：{} / {}", info.members, info.capacity), true),
+                (format!("群主 QQ：{}", info.owner), true),
+                (format!("我的身份：{}", info.role), true),
+                (format!("发言状态：{}", info.speech), true),
+                (format!("介绍：{}", info.description), true),
+            ],
             0,
         ),
         Modal::Profile(profile) => (

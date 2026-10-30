@@ -625,7 +625,7 @@ impl App {
             }
             "profile" => {
                 if self.selected_peer.as_ref().is_some_and(|p| p.is_group()) {
-                    return vec![Action::Members(false)];
+                    return vec![Action::GroupInfo];
                 }
                 if let Some(peer) = &self.selected_peer
                     && peer.chat_type != 8
@@ -743,6 +743,7 @@ impl App {
                         | Modal::Objects { .. }
                         | Modal::ConfirmRecall(_)
                         | Modal::Profile(_)
+                        | Modal::GroupInfo(_)
                         | Modal::GroupFiles { .. }
                 )
         {

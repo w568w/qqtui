@@ -49,6 +49,15 @@ test('group file pages reject unrelated callbacks and cancel with the session', 
   assert.equal(b.groupFileRequest,null);
   await assert.rejects(b.call('files.list',{account:'123',peer},{}),/仅适用于群聊/);
 });
+test('group information preserves native counts, description and membership role', async t => {
+  const {b}=fixture(t);
+  b.presentation.details.set('1234',{groupName:'测试群',remarkName:'备注',groupMemo:'群介绍',memberNum:42,maxMemberNum:200,ownerUin:'456'});
+  b.presentation.groups.set('1234',{memberRole:3});
+  const result=await b.call('groups.info',{account:'123',peer:{chat_type:2,uid:'1234'}},{});
+  assert.equal(result.name,'测试群');assert.equal(result.members,'42');assert.equal(result.capacity,'200');
+  assert.equal(result.role,'管理员');assert.equal(result.description,'群介绍');assert.equal(result.owner,'456');
+  await assert.rejects(b.call('groups.info',{account:'123',peer},{}),/仅适用于群聊/);
+});
 test('file transfer progress is scoped, throttled and removed on completion', async t => {
   const {b}=fixture(t);const events=[];b.event=(kind,value)=>events.push({kind,...value});
   b.mediaWaiters.set('1:2',{name:'a.pdf'});

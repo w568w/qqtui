@@ -7,6 +7,11 @@ pub struct RequestContext {
     pub(crate) native: Option<(uuid::Uuid, String)>,
 }
 pub enum Work {
+    GroupInfo {
+        token: uuid::Uuid,
+        peer: Peer,
+        result: Result<GroupInfo>,
+    },
     GroupFiles {
         token: uuid::Uuid,
         peer: Peer,
@@ -694,6 +699,21 @@ pub(crate) fn apply_work(app: &mut App, controller: &mut Controller, store: &Sto
             .into();
         }
 
+        Work::GroupInfo {
+            token,
+            peer,
+            result,
+        } => {
+            if Some(&peer) == app.selected_peer.as_ref() && app.complete_dialog(token) {
+                match result {
+                    Ok(info) => app.modal = Modal::GroupInfo(info),
+                    Err(error) => {
+                        app.modal = Modal::None;
+                        app.operation_error(&error);
+                    }
+                }
+            }
+        }
         Work::Profile {
             token,
             peer,

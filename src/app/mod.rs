@@ -547,6 +547,7 @@ fn open_objects(message: Message, items: Vec<OpenTarget>) -> (Modal, Vec<Action>
     }
 }
 pub enum Modal {
+    GroupInfo(GroupInfo),
     GroupFiles {
         peer: Peer,
         folders: Vec<GroupFile>,
@@ -656,6 +657,7 @@ pub enum HistoryPoint {
     Around(String),
 }
 pub enum Action {
+    GroupInfo,
     GroupFiles {
         peer: Peer,
         folders: Vec<GroupFile>,
@@ -5079,6 +5081,11 @@ mod release_regressions {
                 finished: false,
             },
         );
+        assert!(matches!(
+            app.key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE))
+                .as_slice(),
+            [Action::GroupInfo]
+        ));
         assert!(matches!(
             app.key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE))
                 .as_slice(),

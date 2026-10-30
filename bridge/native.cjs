@@ -1241,6 +1241,26 @@ class NativeBridge {
       throw new Error("Session context changed; refresh the session");
     if (method === "conversations.snapshot") return this.snapshot();
     if (method === "files.list") return this.groupFiles(p);
+    if (method === "groups.info") {
+      const peer = nativePeer(p.peer);
+      if (peer.chatType !== 2) throw new Error("群资料仅适用于群聊");
+      const permission = await this.presentation.speech(peer.peerUid);
+      context.check();
+      const detail = this.presentation.details.get(peer.peerUid);
+      const group = this.presentation.groups.get(peer.peerUid);
+      if (!detail) throw new Error("QQ 未返回群资料");
+      return {
+        code: peer.peerUid,
+        name: cleanText(detail.groupName),
+        remark: cleanText(detail.remarkName),
+        description: cleanText(detail.groupMemo || detail.fingerMemo),
+        members: String(detail.memberNum ?? ""),
+        capacity: String(detail.maxMemberNum ?? ""),
+        owner: String(detail.ownerUin || ""),
+        role: ({ 2: "成员", 3: "管理员", 4: "群主" })[group?.memberRole] || "未知",
+        speech: cleanText(permission.reason || (permission.state === "allowed" ? "正常" : "未知")),
+      };
+    }
     if (method === "conversations.children" && p.peer?.chat_type === 7)
       return this.snapshot(2);
 

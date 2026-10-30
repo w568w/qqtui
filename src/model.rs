@@ -26,6 +26,18 @@ pub struct GroupFiles {
     pub items: Vec<GroupFile>,
     pub next: Option<u32>,
 }
+#[derive(Clone, Debug, Deserialize)]
+pub struct GroupInfo {
+    pub code: String,
+    pub name: String,
+    pub remark: String,
+    pub description: String,
+    pub members: String,
+    pub capacity: String,
+    pub owner: String,
+    pub role: String,
+    pub speech: String,
+}
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, Hash)]
 pub struct Peer {

@@ -25,6 +25,7 @@
 | profiles.info | account、uid | uid、uin、nick、remark、signature |
 | members.list | account、群 peer | items：uid、uin、name 数组 |
 | files.list | account、群 peer、folder?、start? | items：id、name、folder、size、owner；next 为下一页索引或 null |
+| groups.info | account、群 peer | code、name、remark、description、members、capacity、owner、role、speech |
 | messages.history | account、peer、before?／after?／around?、limit | messages、has_before、has_after、anchor_found；limit 为 1–100 |
 | messages.get | account、peer、ids | messages |
 | messages.forward | account、peer、path（1–8 层原生消息 ID） | 合并转发中的 messages，按原生顺序返回 |
