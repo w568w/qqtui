@@ -60,6 +60,7 @@ receipt 包含 request_id、account、peer、native_id、message_id、state 和�
 
 - notification：notification.items（key、title、body、target）为 QQ 原生 notifiedType=2 的实时重要提醒，保留免打扰群中的原生 @ 提醒，排除旧状态和自发消息；标题带原生未读数。target 包含 account、peer 和原生消息 id，供桌面通知点击定位；不使用消息序号或当前选中会话推断。
 - recent.invalidated：重新读取原生会话快照。
+- transfer：transfer 包含 id、direction（upload／download）、name、done、total（十进制字节数）和 finished；最多每 250 毫秒更新一次，完成或失败后移除。
 - messages：携带新增或更新的 messages。
 - message.recalled：携带 message_peer 和原生 message_seq，清除对应消息正文、附件及引用。
 - messages.invalidated：重新读取当前会话消息。

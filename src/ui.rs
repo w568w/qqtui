@@ -1032,9 +1032,43 @@ pub fn draw(frame: &mut Frame, app: &mut App, media: &mut Media) -> DrawWork {
             app.binding("help")
         )
     };
+    let progress = app
+        .transfers
+        .values()
+        .min_by_key(|transfer| &transfer.id)
+        .map(|transfer| {
+            let done = transfer.done.parse::<u64>().unwrap_or(0);
+            let total = transfer.total.parse::<u64>().unwrap_or(0);
+            let amount = if total > 0 {
+                format!(
+                    "{}% ({done}/{total} B)",
+                    (u128::from(done) * 100 / u128::from(total)).min(100)
+                )
+            } else {
+                format!("{done} B")
+            };
+            format!(
+                "{} {} {amount}{} · ",
+                if transfer.direction == "upload" {
+                    "上传"
+                } else {
+                    "下载"
+                },
+                safe_text(&transfer.name),
+                if app.transfers.len() > 1 {
+                    format!(" · 共 {} 项", app.transfers.len())
+                } else {
+                    String::new()
+                }
+            )
+        })
+        .unwrap_or_default();
     frame.render_widget(
-        Paragraph::new(format!(" {mode} · {}    {hint}", safe_text(&app.notice)))
-            .style(Style::default().fg(MUTED)),
+        Paragraph::new(format!(
+            " {mode} · {progress}{}    {hint}",
+            safe_text(&app.notice)
+        ))
+        .style(Style::default().fg(MUTED)),
         status,
     );
     if let Modal::Preview {

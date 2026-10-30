@@ -318,6 +318,7 @@ class NativeBridge {
     this.receipts = new Map();
     this.inflight = new Map();
     this.mediaWaiters = new Map();
+    this.transfers = new Map();
     this.notificationIds = new Map();
     this.unreadCounts = new Map();
     this.groupWaiters = new Set();
@@ -731,7 +732,10 @@ class NativeBridge {
         this.stickers.clear();
         this.event("stickers.invalidated");
       },
+      onRichMediaProgerssUpdate: (result) => this.transfer(result),
+      onRichMediaUploadComplete: (result) => this.transfer(result, true),
       onRichMediaDownloadComplete: (result) => {
+        this.transfer(result, true);
         const key = `${result.msgId}:${result.msgElementId}`;
         const request = this.mediaWaiters.get(key);
         if (request) {
@@ -820,6 +824,7 @@ class NativeBridge {
     for (const request of [...this.mediaWaiters.values()])
       request.finish(new Error("QQ media session changed"));
     this.mediaWaiters.clear();
+    this.transfers.clear();
     for (const cancel of [...this.viewCancels]) cancel();
     this.viewRequests.clear();
     this.viewWaiters.clear();
@@ -939,6 +944,14 @@ class NativeBridge {
     return this.settle(receipt);
   }
   settle(receipt) {
+    if (["confirmed", "failed"].includes(receipt.state)) {
+      for (const [key, transfer] of this.transfers) {
+        if (transfer.message_id === receipt.native_id || transfer.message_id === receipt.message_id) {
+          this.transfers.delete(key);
+          this.event("transfer", { transfer: { ...transfer, finished: true } });
+        }
+      }
+    }
     return this.saveJournal(receipt)
       .then(() => this.event("send.updated", { receipt }))
       .catch(() => {});
@@ -2002,6 +2015,34 @@ class NativeBridge {
     timer.unref();
     return receipt;
   }
+  transfer(result, finished = false) {
+    const messageId = String(result.msgId || result.commonFileInfo?.msgId || "");
+    const elementId = String(result.msgElementId || result.commonFileInfo?.elemId || "");
+    const key = `${messageId}:${elementId}`;
+    const download = this.mediaWaiters.get(key);
+    const receipt = !download && [...this.receipts.values()].find(receipt =>
+      receipt.account === this.account && ["submitting", "submitted", "unknown"].includes(receipt.state) &&
+      (receipt.native_id === messageId || receipt.message_id === messageId));
+    if (!download && !receipt) return;
+    const previous = this.transfers.get(key);
+    const transfer = {
+      id: key,
+      message_id: messageId,
+      direction: download ? "download" : "upload",
+      name: cleanText(result.commonFileInfo?.fileName || download?.name || previous?.name || path.basename(result.filePath || "")),
+      done: String(result.fileProgress || "0"),
+      total: String(result.totalSize || result.commonFileInfo?.fileSize || previous?.total || "0"),
+      finished,
+      at: Date.now(),
+    };
+    if (finished) this.transfers.delete(key);
+    else {
+      if (!previous && this.transfers.size >= 32) return;
+      if (previous && transfer.at - previous.at < 250) return;
+      this.transfers.set(key, transfer);
+    }
+    this.event("transfer", { transfer });
+  }
   async resolve(p, peer) {
     if (!isNativeId(p.id) || !isNativeId(p.element_id, true))
       throw new Error("Media message and element IDs required");
@@ -2068,7 +2109,9 @@ class NativeBridge {
       request = {
         promise,
         identity,
+        name: cleanText(v.fileName || ""),
         finish: (error, value) => {
+          this.transfer({ msgId: downloadId, msgElementId: p.element_id }, true);
           clearTimeout(timer);
           if (this.mediaWaiters.get(key) === request)
             this.mediaWaiters.delete(key);
@@ -2076,6 +2119,7 @@ class NativeBridge {
         },
       };
       this.mediaWaiters.set(key, request);
+      this.transfer({ msgId: downloadId, msgElementId: p.element_id, totalSize: v.fileSize || "0" });
       timer = setTimeout(
         () => request.finish(new Error("Media download timed out")),
         e.picElement ? 90000 : 120000,

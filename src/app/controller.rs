@@ -138,6 +138,18 @@ impl Controller {
                 }
                 app.seq = event.seq;
                 match event.kind.as_str() {
+                    "transfer" => {
+                        if let Some(transfer) = event.transfer {
+                            if transfer.finished {
+                                app.transfers.remove(&transfer.id);
+                            } else if app.transfers.len() < 32
+                                || app.transfers.contains_key(&transfer.id)
+                            {
+                                app.transfers.insert(transfer.id.clone(), transfer);
+                            }
+                            app.dirty = true;
+                        }
+                    }
                     "notification" => {
                         if let Some(batch) = event.notification {
                             for item in batch.items.into_iter().take(64) {

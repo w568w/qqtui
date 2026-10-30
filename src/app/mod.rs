@@ -735,6 +735,7 @@ pub struct App {
     pub failure_times: HashMap<String, Instant>,
     pub notice_deadline: Option<(String, Instant)>,
     pub pending_images: HashMap<String, bool>,
+    pub transfers: HashMap<String, Transfer>,
     pub failed_images: HashMap<String, String>,
     pub sticker_previews: HashSet<(uuid::Uuid, String)>,
     pub sticker_errors: HashMap<(uuid::Uuid, String), String>,
@@ -790,6 +791,7 @@ impl App {
             failure_times: HashMap::new(),
             notice_deadline: None,
             pending_images: Default::default(),
+            transfers: Default::default(),
             failed_images: Default::default(),
             sticker_previews: Default::default(),
             sticker_errors: Default::default(),
@@ -903,6 +905,7 @@ impl App {
     }
     pub(crate) fn reset_native_pending(&mut self) {
         self.pending_images.clear();
+        self.transfers.clear();
         self.failed_images.clear();
         self.sticker_previews.clear();
         self.sticker_errors.clear();
@@ -3578,6 +3581,7 @@ mod tests {
             message_peer: None,
             message_seq: String::new(),
             notification: None,
+            transfer: None,
         }))
     }
     #[tokio::test]

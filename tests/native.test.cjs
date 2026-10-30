@@ -26,6 +26,22 @@ function fixture(t) {
   return { b, count: () => count, dir,journals };
 }
 const peer = { chat_type: 1, uid: 'u_self' };
+test('file transfer progress is scoped, throttled and removed on completion', async t => {
+  const {b}=fixture(t);const events=[];b.event=(kind,value)=>events.push({kind,...value});
+  b.mediaWaiters.set('1:2',{name:'a.pdf'});
+  b.transfer({msgId:'1',msgElementId:'2',fileProgress:'100',totalSize:'1000'});
+  b.transfer({msgId:'1',msgElementId:'2',fileProgress:'200',totalSize:'1000'});
+  assert.equal(events.length,1);assert.equal(events[0].transfer.direction,'download');
+  assert.equal(events[0].transfer.done,'100');
+  b.transfer({msgId:'9',msgElementId:'2',fileProgress:'300'});assert.equal(events.length,1);
+  b.transfer({msgId:'1',msgElementId:'2'},true);
+  assert.equal(events.at(-1).transfer.finished,true);assert.equal(b.transfers.size,0);
+  b.receipts.set('r',{account:'123',native_id:'3',state:'submitted',request_id:'r',peer});
+  b.transfer({msgId:'3',msgElementId:'4',fileProgress:'50',totalSize:'100'});
+  assert.equal(events.at(-1).transfer.direction,'upload');
+  await b.settle({...b.receipts.get('r'),state:'failed'});
+  assert.equal(events.at(-2).transfer.finished,true);assert.equal(b.transfers.size,0);
+});
 test('older quoted messages resolve by ID and by exact native sequence', async t => {
   const {b}=fixture(t);
   const original={msgId:'90071992547409933',msgSeq:'18446744073709551613',chatType:1,peerUid:'u_self',elements:[{textElement:{content:'older original'}}]};

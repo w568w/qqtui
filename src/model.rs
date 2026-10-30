@@ -4,6 +4,15 @@ pub struct ResolvedMedia {
     pub path: String,
     pub warning: Option<String>,
 }
+#[derive(Clone, Debug, Deserialize)]
+pub struct Transfer {
+    pub id: String,
+    pub direction: String,
+    pub name: String,
+    pub done: String,
+    pub total: String,
+    pub finished: bool,
+}
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, Hash)]
 pub struct Peer {
@@ -461,6 +470,7 @@ pub struct BridgeEvent {
     #[serde(default)]
     pub message_seq: String,
     pub notification: Option<crate::notifications::Batch>,
+    pub transfer: Option<Transfer>,
 }
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Profile {
