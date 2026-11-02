@@ -64,11 +64,11 @@ test('group file pages reject unrelated callbacks and cancel with the session', 
   b.groupFileRequest.update({reqId:6,isEnd:true,item:[]});
   b.groupFileRequest.update({reqId:7,isEnd:true,item:[{peerId:'999',fileInfo:{parentFolderId:'folder'}}]});
   b.groupFileRequest.update({reqId:7,isEnd:false,nextIndex:102,item:[
-    {peerId:'1234',fileInfo:{fileId:'f',fileName:'文档.pdf',fileSize:'9007199254740993',parentFolderId:'folder',uploaderName:'Alice'}},
+    {peerId:'1234',fileInfo:{fileId:'f',fileModelId:'90071992547409933',fileName:'文档.pdf',fileSize:'9007199254740993',parentFolderId:'folder',uploaderName:'Alice'}},
     {peerId:'1234',folderInfo:{folderId:'d',folderName:'目录',parentFolderId:'folder'}},
   ]});
   const result=await request;
-  assert.equal(result.items[0].size,'9007199254740993');assert.equal(result.items[1].folder,true);assert.equal(result.next,102);
+  assert.equal(result.items[0].model_id,'90071992547409933');assert.equal(result.items[0].size,'9007199254740993');assert.equal(result.items[1].folder,true);assert.equal(result.next,102);
   assert.equal(b.groupFileRequest,null);
   const canceled=b.call('files.list',{account:'123',peer:group},{});
   assert.equal(parameters[1].folderId,'/');
@@ -76,6 +76,42 @@ test('group file pages reject unrelated callbacks and cancel with the session', 
   await assert.rejects(canceled,/session changed/);
   assert.equal(b.groupFileRequest,null);
   await assert.rejects(b.call('files.list',{account:'123',peer},{}),/仅适用于群聊/);
+});
+test('group files download by native model ID with shared progress, completion and cancellation', async t => {
+  const {b,dir}=fixture(t);const group={chat_type:2,uid:'1234'};
+  b.clients.add({subscribed:true,destroyed:true});
+  let callback,downloads=0;const events=[];const file=path.join(dir,'document.pdf');
+  b.msg.addKernelMsgListener=object=>{callback=object;};
+  b.recent={addKernelRecentContactListener:()=>{}};
+  b.session.getGroupService=()=>({addKernelGroupListener:()=>{}});
+  b.session.getProfileService=()=>({addKernelProfileListener:()=>{}});
+  const info={fileId:'f',fileModelId:'90071992547409933',fileName:'document.pdf',fileSize:'1000'};
+  b.session.getRichMediaService=()=>({
+    downloadFileForModelId:(p,ids,destination)=>{assert.equal(p.peerUid,'1234');assert.deepEqual(ids,[info.fileModelId]);assert.equal(destination,'');downloads++;return{result:0};},
+  });
+  b.event=(kind,data)=>events.push({kind,...data});b.subscribe();
+  const params={account:'123',peer:group,id:'f',model_id:info.fileModelId,name:info.fileName,size:info.fileSize};
+  const first=b.call('files.download',params,{}),second=b.call('files.download',params,{});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(downloads,1);assert.equal(b.mediaWaiters.size,1);
+  b.transfers.get(`file:${info.fileModelId}`).at-=250;
+  callback.onRichMediaProgerssUpdate({commonFileInfo:info,fileProgress:'500',totalSize:'1000'});
+  assert.equal(events.at(-1).transfer.direction,'download');assert.equal(events.at(-1).transfer.done,'500');assert.equal(events.at(-1).transfer.total,'1000');
+  fs.writeFileSync(file,'content');
+  callback.onRichMediaDownloadComplete({commonFileInfo:info,fileErrCode:'0',filePath:file});
+  assert.deepEqual(await first,{path:file});assert.deepEqual(await second,{path:file});
+  assert.equal(events.at(-1).transfer.finished,true);assert.equal(b.mediaWaiters.size,0);assert.equal(b.transfers.size,0);
+  const failed=b.call('files.download',params,{});
+  await new Promise(resolve=>setImmediate(resolve));
+  callback.onRichMediaDownloadComplete({fileModelId:info.fileModelId,fileErrCode:'9',fileErrMsg:'expired'});
+  await assert.rejects(failed,/expired/);assert.equal(b.mediaWaiters.size,0);
+  const canceled=b.call('files.download',params,{});
+  await new Promise(resolve=>setImmediate(resolve));
+  b.unsubscribe(true);
+  await assert.rejects(canceled,/session changed/);assert.equal(b.transfers.size,0);
+  await assert.rejects(b.call('files.download',{...params,peer},{}),/仅适用于群聊/);
+  await assert.rejects(b.call('files.download',{...params,id:''},{}),/Invalid group file ID/);
+  await assert.rejects(b.call('files.download',{...params,model_id:''},{}),/下载标识/);
 });
 test('group information preserves native counts, description and membership role', async t => {
   const {b}=fixture(t);

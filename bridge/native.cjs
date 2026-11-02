@@ -743,8 +743,8 @@ class NativeBridge {
       onRichMediaUploadComplete: (result) => this.transfer(result, true),
       onRichMediaDownloadComplete: (result) => {
         this.transfer(result, true);
-        const key = `${result.msgId}:${result.msgElementId}`;
-        const request = this.mediaWaiters.get(key);
+        const request = this.mediaWaiters.get(`file:${result.commonFileInfo?.fileModelId || result.fileModelId}`)
+          || this.mediaWaiters.get(`${result.msgId}:${result.msgElementId}`);
         if (request) {
           const code = result.fileErrCode ?? result.result ?? 0;
           if (String(code) !== "0")
@@ -1286,6 +1286,7 @@ class NativeBridge {
       throw new Error("Session context changed; refresh the session");
     if (method === "conversations.snapshot") return this.snapshot();
     if (method === "files.list") return this.groupFiles(p);
+    if (method === "files.download") return this.downloadGroupFile(p);
     if (method === "groups.info") {
       const peer = nativePeer(p.peer);
       if (peer.chatType !== 2) throw new Error("群资料仅适用于群聊");
@@ -2089,7 +2090,8 @@ class NativeBridge {
   transfer(result, finished = false) {
     const messageId = String(result.msgId || result.commonFileInfo?.msgId || "");
     const elementId = String(result.msgElementId || result.commonFileInfo?.elemId || "");
-    const key = `${messageId}:${elementId}`;
+    const fileKey = `file:${result.commonFileInfo?.fileModelId || result.fileModelId}`;
+    const key = this.mediaWaiters.has(fileKey) ? fileKey : `${messageId}:${elementId}`;
     const download = this.mediaWaiters.get(key);
     const receipt = !download && [...this.receipts.values()].find(receipt =>
       receipt.account === this.account && ["submitting", "submitted", "unknown"].includes(receipt.state) &&
@@ -2143,7 +2145,7 @@ class NativeBridge {
         finish(null, {
           items: items.map(item => {
             const file = item.fileInfo, dir = item.folderInfo;
-            return { id: String(file?.fileId || dir?.folderId || ""), name: cleanText(file?.fileName || dir?.folderName || ""),
+            return { id: String(file?.fileId || dir?.folderId || ""), model_id: String(file?.fileModelId || ""), name: cleanText(file?.fileName || dir?.folderName || ""),
               folder: Boolean(dir), size: String(file?.fileSize || "0"), owner: cleanText(file?.uploaderName || dir?.creatorName || "") };
           }),
           next: result.isEnd ? null : next,
@@ -2165,6 +2167,64 @@ class NativeBridge {
       clearTimeout(timer);
       if (this.groupFileRequest === request) this.groupFileRequest = null;
     }
+  }
+  async download(key, identity, name, progress, timeout, submit) {
+    let request = this.mediaWaiters.get(key);
+    if (request && request.identity !== identity)
+      throw new Error("Media identity is busy in another record");
+    if (!request) {
+      if (this.mediaWaiters.size >= 8)
+        throw new Error("Too many active QQ media downloads");
+      let resolve, reject;
+      const promise = new Promise((ok, fail) => {
+        resolve = ok;
+        reject = fail;
+      });
+      let timer;
+      request = {
+        promise,
+        identity,
+        name: cleanText(name),
+        finish: (error, value) => {
+          this.transfer(progress, true);
+          clearTimeout(timer);
+          if (this.mediaWaiters.get(key) === request)
+            this.mediaWaiters.delete(key);
+          error ? reject(error) : resolve(value);
+        },
+      };
+      this.mediaWaiters.set(key, request);
+      this.transfer(progress);
+      timer = setTimeout(
+        () => request.finish(new Error("Media download timed out")),
+        timeout,
+      );
+      try {
+        const submitted = submit();
+        Promise.resolve(submitted)
+          .then(checked)
+          .catch((error) => request.finish(error));
+      } catch (error) {
+        request.finish(error);
+      }
+    }
+    return request.promise;
+  }
+  async downloadGroupFile(p) {
+    const peer = nativePeer(p.peer);
+    if (peer.chatType !== 2) throw new Error("群文件仅适用于群聊");
+    if (typeof p.id !== "string" || !p.id || p.id.length > 1024)
+      throw new Error("Invalid group file ID");
+    const context = this.sessionContext();
+    const service = context.session.getRichMediaService?.();
+    if (typeof service?.downloadFileForModelId !== "function")
+      throw new Error("QQ 群文件下载接口不可用");
+    if (!isNativeId(p.model_id)) throw new Error("QQ 未返回群文件下载标识，请重新打开群文件列表");
+    const result = await this.download(`file:${p.model_id}`, JSON.stringify([peer, p.id]), p.name,
+      { commonFileInfo: { fileModelId: p.model_id, fileName: p.name, fileSize: p.size } },
+      120000, () => service.downloadFileForModelId(peer, [p.model_id], ""));
+    context.check();
+    return { path: result.filePath };
   }
   async resolve(p, peer) {
     if (!isNativeId(p.id) || !isNativeId(p.element_id, true))
@@ -2217,38 +2277,10 @@ class NativeBridge {
     const downloadId = forwarded ? p.forward_path[0] : p.id;
     const key = `${downloadId}:${p.element_id}`;
     const identity = JSON.stringify([peer, p.forward_path || [], p.id]);
-    let request = this.mediaWaiters.get(key);
-    if (request && request.identity !== identity)
-      throw new Error("Media identity is busy in another record");
-    if (!request) {
-      if (this.mediaWaiters.size >= 8)
-        throw new Error("Too many active QQ media downloads");
-      let resolve, reject;
-      const promise = new Promise((ok, fail) => {
-        resolve = ok;
-        reject = fail;
-      });
-      let timer;
-      request = {
-        promise,
-        identity,
-        name: cleanText(v.fileName || ""),
-        finish: (error, value) => {
-          this.transfer({ msgId: downloadId, msgElementId: p.element_id }, true);
-          clearTimeout(timer);
-          if (this.mediaWaiters.get(key) === request)
-            this.mediaWaiters.delete(key);
-          error ? reject(error) : resolve(value);
-        },
-      };
-      this.mediaWaiters.set(key, request);
-      this.transfer({ msgId: downloadId, msgElementId: p.element_id, totalSize: v.fileSize || "0" });
-      timer = setTimeout(
-        () => request.finish(new Error("Media download timed out")),
-        e.picElement ? 90000 : 120000,
-      );
-      try {
-        const submitted = context.msg.downloadRichMedia({
+    try {
+      const downloaded = await this.download(key, identity, v.fileName || "",
+        { msgId: downloadId, msgElementId: p.element_id, totalSize: v.fileSize || "0" },
+        e.picElement ? 90000 : 120000, () => context.msg.downloadRichMedia({
           fileModelId: "0",
           downSourceType: 0,
           downloadScene: 0,
@@ -2260,16 +2292,7 @@ class NativeBridge {
           thumbSize: 0,
           downloadType: 1,
           filePath: source,
-        });
-        Promise.resolve(submitted)
-          .then(checked)
-          .catch((error) => request.finish(error));
-      } catch (error) {
-        request.finish(error);
-      }
-    }
-    try {
-      const downloaded = await request.promise;
+        }));
       context.check();
       return { path: downloaded.filePath };
     } catch (nativeError) {

@@ -159,7 +159,11 @@ impl Backend {
             alive: self.alive.clone(),
             close: self._lifetime.clone(),
         };
-        let seconds = if method == "media.resolve" { 125 } else { 20 };
+        let seconds = if matches!(method, "media.resolve" | "files.download") {
+            125
+        } else {
+            20
+        };
         let value = tokio::time::timeout(Duration::from_secs(seconds), async {
             let mut writer = self.writer.lock().await;
             anyhow::ensure!(self.is_alive(), "QQ 宿主连接已关闭");

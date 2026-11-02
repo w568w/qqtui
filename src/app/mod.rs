@@ -663,6 +663,11 @@ pub enum Action {
         folders: Vec<GroupFile>,
         start: u32,
     },
+    DownloadGroupFile {
+        peer: Peer,
+        file: GroupFile,
+        open: bool,
+    },
     EmojiCatalog(EmojiPurpose),
     ChooseSticker(Sticker),
     Reactions(Message),
@@ -5055,6 +5060,7 @@ mod release_regressions {
             uid: "1234".into(),
         };
         let folder = GroupFile {
+            model_id: String::new(),
             id: "d".into(),
             name: "共享资料".into(),
             folder: true,
@@ -5068,6 +5074,7 @@ mod release_regressions {
                 items: vec![
                     folder,
                     GroupFile {
+                        model_id: String::new(),
                         id: "f".into(),
                         name: "会议记录.pdf".into(),
                         folder: false,
@@ -5097,6 +5104,14 @@ mod release_regressions {
                 .collect();
             assert!(text.contains("1.5 MiB"));
             assert!(text.contains("Bob"));
+        }
+        for (key, open) in [(KeyCode::Enter, false), (KeyCode::Char('o'), true)] {
+            assert!(matches!(
+                app.key(KeyEvent::new(key, KeyModifiers::NONE)).as_slice(),
+                [Action::DownloadGroupFile { peer, file, open: actual }]
+                    if peer.uid == "1234" && file.id == "f" && *actual == open
+            ));
+            assert!(matches!(app.modal, Modal::GroupFiles { index: 2, .. }));
         }
         app.key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
         app.key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
@@ -5143,6 +5158,7 @@ mod release_regressions {
         ));
         let page = GroupFiles {
             items: vec![GroupFile {
+                model_id: String::new(),
                 id: "folder".into(),
                 name: "资料".into(),
                 folder: true,

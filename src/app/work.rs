@@ -18,6 +18,10 @@ pub enum Work {
         folders: Vec<GroupFile>,
         result: Result<GroupFiles>,
     },
+    GroupFileDownloaded {
+        result: Result<ResolvedMedia>,
+        open: bool,
+    },
     UnreadTarget {
         peer: Peer,
         token: uuid::Uuid,
@@ -1178,6 +1182,15 @@ pub(crate) fn apply_work(app: &mut App, controller: &mut Controller, store: &Sto
                 }
             }
         }
+        Work::GroupFileDownloaded { result, open } => match result {
+            Ok(resource) => {
+                app.notice = format!("已下载：{}", resource.path);
+                if open {
+                    controller.action(app, Action::Open(resource.path));
+                }
+            }
+            Err(error) => app.operation_error(&error),
+        },
         Work::Members {
             token,
             peer,

@@ -1407,7 +1407,7 @@ fn draw_modal(
         );
         frame.render_widget(
             Paragraph::new(format!(
-                "h 上级 · l/Enter 进入 · gg/G 首尾 · Esc 关闭  {}/{}",
+                "h 上级 · Enter 进入/下载 · o 打开 · gg/G 首尾 · Esc 关闭  {}/{}",
                 if count == 0 { 0 } else { index + 1 },
                 count
             ))

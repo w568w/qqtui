@@ -1245,6 +1245,18 @@ impl Controller {
                     app.notice = "QQ 原生服务未就绪".into();
                 }
             }
+            Action::DownloadGroupFile { peer, file, open } => {
+                if let Some(b) = self.ready_backend(app) {
+                    app.notice = format!("正在下载：{}", file.name);
+                    let params = json!({"account":account,"peer":peer,"id":file.id,"model_id":file.model_id,"name":file.name,"size":file.size});
+                    tokio::spawn(async move {
+                        let result = b.call("files.download", params).await;
+                        let _ = tx.send(Work::GroupFileDownloaded { result, open }).await;
+                    });
+                } else {
+                    app.notice = "QQ 原生服务未就绪".into();
+                }
+            }
             Action::Members(mention) => {
                 if let (Some(b), Some(peer)) = (self.ready_backend(app), peer) {
                     if !peer.is_group() {

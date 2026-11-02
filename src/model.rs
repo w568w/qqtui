@@ -16,6 +16,8 @@ pub struct Transfer {
 #[derive(Clone, Debug, Deserialize)]
 pub struct GroupFile {
     pub id: String,
+    #[serde(default)]
+    pub model_id: String,
     pub name: String,
     pub folder: bool,
     pub size: String,

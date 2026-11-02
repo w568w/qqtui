@@ -1343,7 +1343,7 @@ impl App {
                     });
                 } else if matches!(
                     key.code,
-                    KeyCode::Enter | KeyCode::Right | KeyCode::Char('l')
+                    KeyCode::Enter | KeyCode::Right | KeyCode::Char('l' | 'o')
                 ) {
                     if parent == 1 && index == 0 {
                         folders.pop();
@@ -1359,6 +1359,12 @@ impl App {
                                 peer: peer.clone(),
                                 folders: folders.clone(),
                                 start: 0,
+                            });
+                        } else {
+                            actions.push(Action::DownloadGroupFile {
+                                peer: peer.clone(),
+                                file: item.clone(),
+                                open: key.code == KeyCode::Char('o'),
                             });
                         }
                     } else if let Some(start) = page.next {
