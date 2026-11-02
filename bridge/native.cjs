@@ -1181,6 +1181,19 @@ class NativeBridge {
             (c.chatType === 7 ? c.unreadChatCnt : c.unreadCnt) || "0",
           ),
           pinned: Boolean(c.topFlag),
+          attention: c.chatType === 7
+            ? "normal"
+            : (c.listOfSpecificEventTypeInfosInMsgBox || []).some(
+                (event) => event.msgInfos?.length &&
+                  [1000, 1004, 1006, 1007, 2000, 2001].includes(Number(event.eventTypeInMsgBox)),
+              )
+              ? "important"
+              : String(c.unreadCnt || "0") !== "0" &&
+                  (c.chatType === 2
+                    ? Number(c.shieldFlag) === 1
+                    : ![1, 100].includes(c.chatType) || (!c.isMsgDisturb && !c.isBlock))
+                ? "notify"
+                : "normal",
           preview: cleanText(
             (c.abstractContent || []).map((e) => e.content || "").join(""),
           ),

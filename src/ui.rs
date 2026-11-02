@@ -1,7 +1,7 @@
 use crate::{
     app::{App, EmojiPurpose, Focus, Modal, Mode, PreviewZoom, action_labels, sticker_choices},
     media::{ImageKey, Media},
-    model::{Attachment, Message, MessagePart, Peer, Sticker, safe_text},
+    model::{Attachment, Attention, Conversation, Message, MessagePart, Peer, Sticker, safe_text},
 };
 use ratatui::{
     Frame,
@@ -19,6 +19,14 @@ use unicode_width::UnicodeWidthStr;
 
 const CYAN: Color = Color::Rgb(97, 175, 190);
 const MUTED: Color = Color::Rgb(130, 140, 150);
+fn conversation_style(conversation: &Conversation) -> Style {
+    let (color, modifier) = match conversation.attention {
+        Attention::Normal => (MUTED, Modifier::empty()),
+        Attention::Notify => (Color::White, Modifier::BOLD),
+        Attention::Important => (Color::Yellow, Modifier::BOLD),
+    };
+    Style::default().fg(color).add_modifier(modifier)
+}
 #[derive(Default)]
 pub struct HitRegions {
     pub sidebar: Rect,
@@ -436,7 +444,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, media: &mut Media) -> DrawWork {
                 };
                 let pin = if c.pinned { "↑ " } else { "" };
                 ListItem::new(Line::from(format!("{pin}{}{unread}", safe_text(&c.name))))
-                    .style(Style::default().fg(if c.unread != "0" { Color::White } else { MUTED }))
+                    .style(conversation_style(c))
             })
             .collect();
         let selected = app
@@ -452,7 +460,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, media: &mut Media) -> DrawWork {
                 .block(panel(" 会话 ".into(), app.focus == Focus::Conversations))
                 .highlight_spacing(HighlightSpacing::Always)
                 .highlight_symbol("▸ ")
-                .highlight_style(Style::default().fg(CYAN).add_modifier(Modifier::BOLD)),
+                .highlight_style(Style::default().add_modifier(Modifier::REVERSED)),
             sidebar,
             &mut state,
         );
@@ -1721,6 +1729,7 @@ fn draw_modal(
         }
         return;
     }
+    let mut conversation_styles = Vec::new();
     let (title, query, items, index): (String, String, Vec<(String, bool)>, usize) = match &app
         .modal
     {
@@ -1793,6 +1802,7 @@ fn draw_modal(
             app.switcher_items(query)
                 .into_iter()
                 .map(|c| {
+                    conversation_styles.push(conversation_style(c));
                     (
                         format!(
                             "{}  {}",
@@ -1938,6 +1948,7 @@ fn draw_modal(
                 .iter()
                 .filter(|c| c.name.to_lowercase().contains(&query.to_lowercase()))
                 .map(|c| {
+                    conversation_styles.push(conversation_style(c));
                     (
                         format!(
                             "{} {}{}",
@@ -2025,18 +2036,23 @@ fn draw_modal(
     if app.modal.accepts_text() {
         input_cursor(frame, input, &query);
     }
-    let items = items.into_iter().map(|(s, enabled)| {
-        ListItem::new(safe_text(&s)).style(Style::default().fg(if enabled {
-            Color::White
-        } else {
-            MUTED
-        }))
+    let selection_style = if conversation_styles.is_empty() {
+        Style::default().fg(CYAN).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().add_modifier(Modifier::REVERSED)
+    };
+    let items = items.into_iter().enumerate().map(|(i, (s, enabled))| {
+        let style = conversation_styles
+            .get(i)
+            .copied()
+            .unwrap_or_else(|| Style::default().fg(if enabled { Color::White } else { MUTED }));
+        ListItem::new(safe_text(&s)).style(style)
     });
     let mut state = ListState::default().with_selected(Some(index));
     frame.render_stateful_widget(
         List::new(items)
             .highlight_symbol("▸ ")
-            .highlight_style(Style::default().fg(CYAN).add_modifier(Modifier::BOLD)),
+            .highlight_style(selection_style),
         list,
         &mut state,
     );
@@ -2045,6 +2061,28 @@ fn draw_modal(
 #[cfg(test)]
 mod rich_message_tests {
     use super::*;
+
+    #[test]
+    fn conversation_attention_survives_cache_and_selection() {
+        let mut conversation: Conversation = serde_json::from_str(
+            r#"{"peer":{"chat_type":2,"uid":"1"},"id":"1","name":"群","unread":"5","pinned":false}"#,
+        ).unwrap();
+        assert_eq!(conversation.attention, Attention::Normal);
+        for attention in [Attention::Normal, Attention::Notify, Attention::Important] {
+            conversation.attention = attention;
+            let cached: Conversation =
+                serde_json::from_str(&serde_json::to_string(&conversation).unwrap()).unwrap();
+            assert_eq!(cached.attention, attention);
+            let style = conversation_style(&cached);
+            let selected = style.patch(Style::default().add_modifier(Modifier::REVERSED));
+            assert_eq!(selected.fg, style.fg);
+            assert_eq!(
+                selected.add_modifier.contains(Modifier::BOLD),
+                attention != Attention::Normal
+            );
+            assert!(selected.add_modifier.contains(Modifier::REVERSED));
+        }
+    }
 
     #[test]
     fn ordered_faces_flow_inline_once_and_legacy_cache_does_not_guess_positions() {

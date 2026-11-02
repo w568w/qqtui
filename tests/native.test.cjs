@@ -207,6 +207,37 @@ test('recent snapshot preserves native order, folder entries, exact unread and p
   assert.equal(s.conversations[1].unread, '999');
   assert.equal(s.conversations[1].pinned, true);
 });
+test('recent snapshot restores native attention while keeping the assistant entry normal', async t => {
+  const {b}=fixture(t);
+  const make=(id,extra={})=>({contactId:id,chatType:2,peerUid:id,unreadCnt:'5',shieldFlag:'1',...extra});
+  const contacts=[make('friend',{chatType:1,shieldFlag:'0'}),make('group'),make('quiet',{shieldFlag:'4'}),
+    make('muted-friend',{chatType:1,shieldFlag:'0',isMsgDisturb:true}),make('read',{unreadCnt:'0',atType:2}),
+    make('unknown',{shieldFlag:undefined}),make('folder',{chatType:7,unreadChatCnt:'1',atType:2})];
+  const child=make('child',{shieldFlag:'2',atType:2,listOfSpecificEventTypeInfosInMsgBox:[{eventTypeInMsgBox:1000,msgInfos:[{msgId:'1'}]}]});
+  b.contacts.set('child',child);
+  b.views.set(1,{sortedContactList:contacts.map(c=>c.contactId)});
+  b.views.set(2,{sortedContactList:['child']});
+  b.recent={getRecentContactListSnapShot:async()=>({info:{changedList:contacts}})};
+  let snapshot=await b.snapshot();
+  assert.deepEqual(snapshot.conversations.map(c=>c.attention),['notify','notify','normal','normal','normal','normal','normal']);
+  assert.equal(snapshot.conversations.at(-1).children[0].attention,'important');
+  child.unreadCnt='0';child.listOfSpecificEventTypeInfosInMsgBox=[];
+  snapshot=await b.snapshot();
+  assert.equal(snapshot.conversations.at(-1).attention,'normal');
+  assert.equal(snapshot.conversations.at(-1).children[0].attention,'normal');
+  child.shieldFlag='1';child.unreadCnt='5';
+  snapshot=await b.snapshot();
+  assert.equal(snapshot.conversations.at(-1).attention,'normal');
+  assert.equal(snapshot.conversations.at(-1).children[0].attention,'notify');
+  for(const type of [1000,1004,1006,1007,2000,2001]) {
+    child.listOfSpecificEventTypeInfosInMsgBox=[{eventTypeInMsgBox:type,msgInfos:[{msgId:'1'}]}];
+    assert.equal((await b.snapshot()).conversations.at(-1).children[0].attention,'important');
+  }
+  child.listOfSpecificEventTypeInfosInMsgBox=[{eventTypeInMsgBox:1000,msgInfos:[]}];
+  assert.equal((await b.snapshot()).conversations.at(-1).children[0].attention,'notify');
+  contacts[0].isBlock=true;
+  assert.equal((await b.snapshot()).conversations[0].attention,'normal');
+});
 test('stale account calls never reach a native method', async t => {
   const { b, count } = fixture(t);
   await assert.rejects(b.call('messages.send', { account: '456', peer, request_id: 'wrong-account', text: 'no' }, {}), /Account changed/);

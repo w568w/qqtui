@@ -61,6 +61,14 @@ impl Peer {
         self.chat_type == 103
     }
 }
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Attention {
+    #[default]
+    Normal,
+    Notify,
+    Important,
+}
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Conversation {
     pub peer: Peer,
@@ -68,6 +76,8 @@ pub struct Conversation {
     pub name: String,
     pub unread: String,
     pub pinned: bool,
+    #[serde(default)]
+    pub attention: Attention,
     #[serde(default)]
     pub preview: String,
     #[serde(default)]

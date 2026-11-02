@@ -1126,6 +1126,13 @@ impl App {
         self.epoch = s.epoch;
         self.unread_total = s.unread_total.and_then(|n| n.parse().ok());
         self.conversations = s.conversations;
+        if let Modal::Contacts { items, .. } = &mut self.modal {
+            for item in items {
+                if let Some(current) = find_conversation(&self.conversations, &item.peer) {
+                    *item = current.clone();
+                }
+            }
+        }
         if self
             .selected_peer
             .as_ref()
@@ -1214,6 +1221,44 @@ pub fn word_boundary(text: &str, pos: usize, forward: bool) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn snapshots_refresh_unread_in_open_group_lists_without_moving_selection() {
+        let mut app = App::new(Config::default());
+        app.account = "a".into();
+        let mut child = conversation("group-b");
+        child.unread = "5".into();
+        child.attention = Attention::Important;
+        let other = conversation("group-a");
+        let mut folder = conversation("folder");
+        folder.peer.chat_type = 7;
+        app.selected_peer = Some(folder.peer.clone());
+        app.modal = Modal::Contacts {
+            query: "group".into(),
+            index: 1,
+            items: vec![other.clone(), child.clone()],
+        };
+        child.unread = "0".into();
+        child.attention = Attention::Normal;
+        folder.children = vec![child.clone(), other];
+        app.apply_snapshot(Snapshot {
+            account: "a".into(),
+            conversations: vec![folder],
+            ..Default::default()
+        });
+        let Modal::Contacts {
+            query,
+            index,
+            items,
+        } = &app.modal
+        else {
+            panic!("group list closed")
+        };
+        assert_eq!((query.as_str(), *index), ("group", 1));
+        assert_eq!(items[1].peer, child.peer);
+        assert_eq!(items[1].unread, "0");
+        assert_eq!(items[1].attention, Attention::Normal);
+    }
+
     #[test]
     fn mouse_opens_group_folder_and_folder_rows_show_unread_counts() {
         use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};

@@ -43,7 +43,7 @@
 | reactions.members | account、群 peer、id、emoji_id、emoji_type、cookie? | members、下一页 cookie 或 null |
 | reactions.refresh | account、群 peer、seq | 目标原生消息的最新状态 |
 
-会话记录包含 peer、id、name、unread 字符串、pinned、preview、last_id 和 children。顺序沿用原生 sortedContactList，置顶来自 topFlag，摘要来自 abstractContent。
+会话记录包含 peer、id、name、unread 字符串、pinned、attention、preview、last_id 和 children。顺序沿用原生 sortedContactList，置顶来自 topFlag，摘要来自 abstractContent。attention 为 normal、notify 或 important：普通未读遵循 QQ 会话项的 showUnReadCnt／unReadCntType 判定；重要提醒遵循 AbstractParser.getShowMsgBox，读取 listOfSpecificEventTypeInfosInMsgBox 中类型为 1000、1004、1006、1007、2000、2001 且 msgInfos 非空的事件，不使用 atType。群助手入口固定为 normal，内部群聊分别判定。旧缓存缺少该字段时按 normal 显示，连接后由快照刷新。
 
 消息记录包含 account、peer、id、seq、time、sender、sender_uid、is_self、text、attachments、reply_to、reply_seq、send_status、correlation，以及 recalled 状态。notice_names 保存按 UID／QQ 号查询得到的通知参与者名称；reaction_notice 的 msgseq 引用必须排除共享该序号的灰条通知。新增可选 parts 按原生顺序保存文字与附件引用；card_parts 为需要按卡片排版的文字 parts 的零基索引；forward 保存合并转发卡片的 XML 或 JSON。原生历史中的撤回灰条也会转换为 recalled，正文显示原生撤回操作者和可用提示，清除附件与引用；不依赖此前收到实时撤回事件。附件包含 element_id、kind、name、path、size；草稿附件可带仅供本地显示的 display_name。
 
