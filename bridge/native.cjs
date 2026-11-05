@@ -1229,12 +1229,13 @@ class NativeBridge {
       if (!this.loginConnecting) {
         login.addKernelLoginListener(listener({
           onLoginConnected: () => { this.loginConnected = true; },
-          onLoginDisconnected: () => { this.loginConnected = false; },
+          onLoginDisConnected: () => { this.loginConnected = false; },
         }));
         this.loginConnecting = true;
         login.connect();
       }
-      if (!this.loginConnected || login.getMsfStatus() === 3)
+      const msfStatus = login.getMsfStatus();
+      if ((!this.loginConnected && msfStatus !== 1) || msfStatus === 3)
         return { attempted: false, pending: true };
       this.quickLoginAttempt ??= login.quickLoginWithUin(String(item.uin))
         .then(result => {

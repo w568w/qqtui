@@ -305,7 +305,6 @@ pub async fn login_if_needed(paths: &Paths) -> Result<()> {
                                 login_since = Some(std::time::Instant::now());
                                 eprintln!("QQ 宿主：正在自动登录");
                             }
-                            Ok(result) if result["pending"] == true => login_since = None,
                             Ok(_) => {}
                             Err(error) => {
                                 quick_login = true;
